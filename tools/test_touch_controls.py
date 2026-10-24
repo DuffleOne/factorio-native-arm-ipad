@@ -37,7 +37,7 @@ def main():
                     '-target','arm64-apple-ios26.0-simulator',
                     '-isysroot',str(sdk_path('iphonesimulator')),'-fobjc-arc',
                     f'-DFPI_SDL_MAJOR={sdl_major}',*include,
-                    str(ROOT/'tests/TouchControlsHarness.m'),'-framework','UIKit',
+                    str(ROOT/'tests/TouchControlsHarness.m'),'-framework','UIKit','-framework','GameController',
                     '-framework','Foundation','-framework','CoreGraphics','-framework','QuartzCore',
                     '-o',str(app/'TouchControlsTests')],check=True)
     subprocess.run(['codesign','--force','--sign','-',str(app)],check=True)

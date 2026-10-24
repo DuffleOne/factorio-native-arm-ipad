@@ -64,7 +64,7 @@ int ProbeMain(int argc, char **argv) {
             if (![text writeToFile:config atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
                 fprintf(stderr,"FACTORIO_PROBE: cannot write config: %s\n",error.description.UTF8String); return 1;
             }
-            NSMutableArray<NSString *> *arguments=[@[[NSString stringWithUTF8String:argv[0]],@"--config",config,@"--nogamepad"] mutableCopy];
+            NSMutableArray<NSString *> *arguments=[@[[NSString stringWithUTF8String:argv[0]],@"--config",config] mutableCopy];
             if (coreTest || benchmarkTest) [arguments addObject:@"--disable-audio"];
             if (coreTest) {
                 NSString *settings=[root stringByAppendingPathComponent:@"map-gen-settings.json"];
@@ -104,6 +104,8 @@ int ProbeMain(int argc, char **argv) {
                 device.name.UTF8String ?: "none", [device supportsFamily:MTLGPUFamilyMac1],
                 [device supportsFamily:MTLGPUFamilyApple7],[device supportsFamily:MTLGPUFamilyApple3]);
         fprintf(stderr,"FACTORIO_PROBE: entering UIKit with original game main\n");
+        // Portrait puts the game above a dedicated control deck (see TouchControls.m).
+        setenv("SDL_IOS_ORIENTATIONS","LandscapeLeft LandscapeRight Portrait",0);
         InstallTouchControls();
 #if FPI_SDL_MAJOR == 3
         return run(argc,argv,original,NULL);

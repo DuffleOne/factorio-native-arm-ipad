@@ -55,17 +55,17 @@ On the tested landscape inner display, the window was **951 × 669 points**
 (2757 × 1911 pixels). The top and bottom margins are both 16 points; the side
 margins follow the larger of the system safe area and 16 points.
 
-Use the mode button above the game to select the input behavior:
+Use the first three icons in the pill above the game to select the input behavior:
 
 | Mode | Touch behavior |
 |---|---|
 | Tap | Direct touch for menus and ordinary selection |
 | Mine | Touch and hold ore or a tree to hold the right mouse button |
-| Cursor | Move a visible pointer without clicking; hold **Left click** or **Right click** to act at its position |
+| Cursor | Move a visible pointer without clicking; hold **Use** (left click) or **Mine** (right click) to act at its position |
 
 The on-screen mouse buttons stay down while your finger remains on them and
 release when you lift it. To drag, hold a mouse button and move the cursor
-with a second finger. **Hide controls** clears space if you are using a
+with a second finger. The eye icon hides the controls if you are using a
 hardware keyboard and mouse. Control positions adapt when the window size
 changes; an in-progress held input is released on resize to avoid a stuck key.
 See the [full control map](../README.md#touch-controls-and-hardware-input).

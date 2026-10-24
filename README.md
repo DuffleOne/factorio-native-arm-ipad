@@ -266,37 +266,82 @@ the same app and its existing data are updated.
 
 ## Touch controls and hardware input
 
+The controls are icon-based, translucent, and fade back after five seconds
+without a touch; the next touch on a control brings them back. Buttons give a
+light haptic tap when pressed.
+
 | Control | Function |
 |---|---|
-| Stick at the bottom left | WASD movement, including diagonals |
-| Inventory / Rotate / Clear / pick | E / R / Q: inventory, rotate, clear cursor or pick an entity with the pipette |
-| Map / Research / Tab | M / T / Tab; Tab also acknowledges the corresponding tutorial prompt |
-| Pick up / Shoot / Menu | F / Space / Escape |
-| + / − / Enter | Zoom through mouse-wheel events / confirm |
+| Pill at the top | Input mode (Tap / Mine / Cursor), on-screen keyboard, and hide/show controls |
+| Stick at the bottom left | WASD movement in eight equal sectors, so diagonals are as easy to hold as straight lines |
+| Rail above the stick | Menu (Escape), Inventory (E), Research (T), Map (M) |
+| **Use** — large button in the bottom-right corner | Left mouse button |
+| Inner arc: **Mine** / **Rotate** / **Pipette** | Right mouse button / R / Q (clear cursor or pick an entity) |
+| Outer arc: **Pick up** / **Shoot** / **Gun** / **Middle** | F / Space / Tab (switch gun; also acknowledges the matching tutorial prompt) / middle mouse button |
+| Zoom pair above the arc | Zoom out / in through mouse-wheel events |
 | Shift / Ctrl / Alt | Toggle modifiers on; tap again to release |
-| Left click / Middle click / Right click | Grouped on the bottom row: left, middle, and right mouse buttons |
-| Keyboard | Additional on-screen keyboard with letters, numbers, and special keys |
-| Hide controls / Show controls | Hide or show the on-screen controls |
+| Keyboard | Full on-screen keyboard with letters, numbers, Enter, and special keys |
 
-The mode button at the top cycles through:
+Select a mode directly in the top pill; the active mode is highlighted and a
+short hint appears below it:
 
 - **Tap:** Touching the screen clicks directly. Use this for normal menu interaction.
 - **Mine:** Holding a finger on a tree or ore acts as holding the right mouse
   button. Switch back to Tap for menus.
 - **Cursor:** Touch positions a visible white arrow without clicking. Then press
-  one of the three mouse buttons. The arrow tip marks the click position. To drag,
+  **Use** or **Mine**. The arrow tip marks the click position. To drag,
   hold a mouse button and slide a second finger across the game area. Building
   actions involving multiple fingers still need further device testing.
 
-Left click is used for actions such as selecting and placing; Right click for
-mining and other inventory actions; Middle click for actions such as setting
-inventory filters. The exact effect depends on the game context and key bindings.
+**Use** (left click) is used for actions such as selecting and placing; **Mine**
+(right click) for mining and other inventory actions; **Middle** for actions such
+as setting inventory filters. The exact effect depends on the game context and key bindings.
 Separate mouse buttons are not needed for ordinary tapping.
 
-Connect an external keyboard and mouse directly to the device and select
-**Hide controls**. SDL includes hardware keyboard, mouse movement, mouse button,
-and scrolling support, but the complete hardware workflow remains untested.
-Controllers are currently disabled.
+### Portrait split layout
+
+Rotate the device to portrait to move the controls onto an opaque deck below the
+game. The game view shrinks to the upper part of the screen, so no control covers
+it; the on-screen keyboard opens in the deck and leaves the game visible above.
+Hiding the controls gives the game the whole portrait screen again.
+
+### Bluetooth keyboard, mouse or trackpad, and controllers
+
+When a keyboard, mouse/trackpad, or game controller connects, the touch controls
+hide automatically and a short notice says so; tap the eye icon to bring them
+back. They return automatically when all hardware disconnects, unless you changed
+them yourself in the meantime.
+
+**Trackpad or mouse on iPhone:** iOS on iPhone does not pass Bluetooth mouse or
+trackpad movement to apps. It reports the device as connected, but no movement
+reaches the game, and iOS refuses the pointer lock that would release it (tested
+on iPhone Duo, iOS 27.1). Turn on **Settings → Accessibility → Touch →
+AssistiveTouch** and pair the trackpad under **Pointer Devices**. Its pointer
+movement then reaches the game as hover. On iPhone Duo with iOS 27.1, AssistiveTouch
+draws its pointer and delivers its taps only on the outer display, even while the
+app is on the inner one (an iOS bug); the port draws its own white arrow there
+once hover movement arrives. iOS 27.2 RC2 draws the AssistiveTouch pointer on the
+inner display, so the port does not add its arrow on 27.2 or later.
+
+iPhone also keeps the trackpad's **left** button for AssistiveTouch's tap, and
+because of the same bug that tap never reaches the inner display. Only the right
+button arrives, so on iPhone the port makes the **right button act as left click**
+(select, build, open). To mine
+or remove with the trackpad, bind **Mine** and the other right-click actions to
+keyboard keys in Factorio's **Settings → Controls**, or use the overlay's Mine
+mode. If a trackpad does deliver left-button events, the mapping returns to
+normal after the first left click. iOS 27.2 RC2 fixes both problems: the
+AssistiveTouch pointer and left-click tap work on the inner display, so the port
+keeps the trackpad's buttons as they are and draws no arrow of its own while
+AssistiveTouch is running.
+
+On iPad, the port asks for pointer lock when a mouse connects, forwards the
+movement to the game, and draws the white arrow once movement arrives. Mouse
+buttons and scrolling come from SDL.
+
+Factorio's own controller support is no longer disabled at launch (the
+`--nogamepad` argument was removed). Controller play is experimental and has
+not yet been tested on the device.
 
 ## Saves, updates, and renewing signing
 

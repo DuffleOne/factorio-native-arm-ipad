@@ -91,7 +91,7 @@ def build_shim(app, uikit=False, sdk='iphonesimulator', sdl_major=2):
         command += [str(ROOT/'probe/UIKitEntry.m'),str(ROOT/'probe/MetalCompat.m'),
                     str(ROOT/'probe/TouchControls.m'),'-I'+str(source/'include'),
                     f'-DORIGINAL_MAIN_OFFSET={main_offset}',f'-DFPI_SDL_MAJOR={sdl_major}',
-                    '-framework','UIKit']
+                    '-framework','UIKit','-framework','GameController']
         if sdl_major == 3:
             command += ['-I'+str(source/'include/SDL3')]
         sdl = frameworks/sdl_name
@@ -194,7 +194,8 @@ def main():
                 CFBundleSupportedPlatforms=['iPhoneSimulator' if args.sdk=='iphonesimulator' else 'iPhoneOS'], MinimumOSVersion='26.0',
                 UIDeviceFamily=[1,2], LSRequiresIPhoneOS=True, UILaunchScreen={})
     if args.uikit:
-        info['UISupportedInterfaceOrientations'] = ['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight']
+        info['UISupportedInterfaceOrientations'] = ['UIInterfaceOrientationLandscapeLeft','UIInterfaceOrientationLandscapeRight',
+                                                     'UIInterfaceOrientationPortrait']
         info['UIApplicationSupportsIndirectInputEvents'] = True
         info['UIStatusBarHidden'] = True
         info['UIViewControllerBasedStatusBarAppearance'] = False

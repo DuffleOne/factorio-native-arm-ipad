@@ -66,3 +66,19 @@ FPI_EXPORT int FPIGetPointer(float *x,float *y) {
     *x=(float)mouseX/width; *y=(float)mouseY/height;
     return 1;
 }
+// SDL forwards GCMouse movement only while the pointer is locked in relative
+// mode, and iPhone has no system pointer, so a Bluetooth trackpad would not move
+// the cursor in normal play. Feed those deltas in as ordinary motion instead.
+FPI_EXPORT void FPIMouseDelta(float dx,float dy) {
+    SDL_Window *window=inputWindow();
+    if (!window || SDL_GetMouse()->relative_mode) return;
+#if SDL_MAJOR_VERSION >= 3
+    SDL_SendMouseMotion(0, window, SDL_GLOBAL_MOUSE_ID, true, dx, dy);
+#else
+    SDL_SendMouseMotion(window,0,1,(int)dx,(int)dy);
+#endif
+}
+// Points kept free below the game view for the portrait control deck.
+static float reservedBottom;
+FPI_EXPORT void FPISetReservedBottom(float bottom) { reservedBottom=bottom; }
+FPI_EXPORT float FPIReservedBottom(void) { return reservedBottom; }

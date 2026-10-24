@@ -141,7 +141,9 @@ def adapt_sdl3_scene_window(source):
         const CGFloat corner = 16.0f;
         safe.top = SDL_max(safe.top, corner);
         safe.left = SDL_max(safe.left, corner);
-        safe.bottom = corner;
+        // The portrait control deck reserves the lower part of the window.
+        extern float FPIReservedBottom(void);
+        safe.bottom = SDL_max(corner, FPIReservedBottom());
         safe.right = SDL_max(safe.right, corner);
         frame = UIEdgeInsetsInsetRect(frame, safe);
     }
@@ -152,15 +154,19 @@ def adapt_sdl3_scene_window(source):
 #endif // SDL_PLATFORM_VISIONOS
 '''
     if new_viewport not in video_text:
+        bottom_line = '''        // The portrait control deck reserves the lower part of the window.
+        extern float FPIReservedBottom(void);
+        safe.bottom = SDL_max(corner, FPIReservedBottom());'''
         previous_bottoms = [
+            '''        safe.bottom = corner;''',
             '''        // Keep the HUD above the home indicator while reclaiming a little of
         // the otherwise unused bottom safe area.
         safe.bottom = SDL_max(safe.bottom - 6.0f, corner);''',
             '''        safe.bottom = SDL_max(safe.bottom, corner);''',
         ]
-        previous = next((new_viewport.replace('        safe.bottom = corner;', bottom)
+        previous = next((new_viewport.replace(bottom_line, bottom)
                          for bottom in previous_bottoms
-                         if new_viewport.replace('        safe.bottom = corner;', bottom) in video_text), None)
+                         if new_viewport.replace(bottom_line, bottom) in video_text), None)
         if previous is not None:
             video_text = video_text.replace(previous, new_viewport, 1)
         elif video_text.count(old_viewport) == 1:
