@@ -251,8 +251,8 @@ xcrun devicectl device uninstall app \
 
 ### iPhone Duo simulator checks
 
-The iPhone Duo profile requires an Xcode with the matching iOS simulator runtime
-(27.1 or later); an iOS 27.0 runtime cannot boot it. If multiple Xcode versions are
+The iPhone Duo simulator profile needs **Xcode 27.2 or later**, even though the
+Duo shipped with iOS 27.1; an iOS 27.0 runtime cannot boot it. If multiple Xcode versions are
 installed, set `DEVELOPER_DIR` to the desired app's `Contents/Developer` directory.
 Use `xcrun simctl list devices available` to obtain the simulator UDID.
 
