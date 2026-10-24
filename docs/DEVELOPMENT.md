@@ -1,7 +1,148 @@
-# Development and local checks
+# Development
 
-First complete setup and a device build as described in the [README](../README.md).
-Run all commands here from the repository root.
+This page is for working on the port itself. To just install the game, use the
+[install guide](INSTALL.md). How the port works is described in
+[Architecture](ARCHITECTURE.md). Run all commands from the repository root.
+
+## Tools
+
+| | |
+|---|---|
+| Mac | Apple Silicon, with Terminal running natively (not under Rosetta) |
+| Xcode | iOS SDK 26 or newer; **Xcode 27.2 or later** for iPhone Duo |
+| Python | 3.12 or newer (tested: 3.14) |
+| CMake | In `PATH` when running setup; setup saves its absolute path for Xcode |
+
+```sh
+xcodebuild -version
+xcrun --sdk iphoneos --show-sdk-version
+python3 --version
+cmake --version
+brew install python cmake   # if missing
+```
+
+If `xcodebuild` points only to the Command Line Tools, select the full Xcode
+under **Xcode → Settings → Locations → Command Line Tools**, or set
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for the session.
+
+The first build needs an internet connection to download PyYAML, SDL, and, if
+necessary, Apple signing profiles. SDL 3.4.14 (for Factorio 2.1.23) or SDL 2.30.9
+(for 2.0.77) comes from the official SDL repository and is checked against a
+pinned SHA-256 hash.
+
+## Supported game executables
+
+The hash is of `factorio.app/Contents/MacOS/factorio`, the whole universal
+executable, not the app folder or only its ARM64 slice. A matching version
+number alone isn't enough: other distributions or re-signed executables differ.
+No dSYM is needed; the required symbols are read from the verified executable.
+
+| Version | SHA-256 | Status |
+|---|---|---|
+| **2.1.23**, build 87750, Steam | `42218e9676f36687282800e5b6336b049c0f0e45f0f71eb20f90c49ccdec4359` | iPhone Duo and iPad. SDL 3.4.14, 1,269 SDL redirects. 120-update Space Age probe: `4032494708` on Mac, Duo simulator and physical Duo |
+| 2.0.77, build 84539 | `00b014d78df07e05ab1cee853904c8f7b3814ca652c043461a9d49fbad46cdf6` | Upstream-tested on iPad. SDL 2.30.9, 817 SDL redirects. Base-game probe: `2892897386` |
+| 2.0.77, build 84539, Steam | `90e2ebfdb5fd8b3966915f704a0ae99177c2af64ed9267c634ced42bff36d820` | Experimental. Built with Xcode 27 and rendered the Space Age main menu on an M1 iPad Pro (iPadOS 27); Space Age probe: `2376201887` |
+
+Setup checks the entry point, SDL version and unused Mach-O space before
+patching a copy; the original game is never modified. The build records the
+source hash, and verification rejects an app built from a different source.
+Every other hash is rejected. **Do not remove the hash check:** the patches are
+specific to these executables, and another version needs a new analysis.
+
+```sh
+python3 tools/setup.py                                  # standard Steam location
+python3 tools/setup.py --app "/path/to/your/factorio.app"
+```
+
+Setup creates `.venv`, installs the pinned Python dependency, and writes local
+paths to the ignored `.local-config.json` (see
+[`local-config.example.json`](../local-config.example.json)). The installer adds
+the chosen `device_id`, `team_id` and `bundle_id` to the same file.
+
+## Building and installing
+
+### With the installer
+
+`Install Factorio.command` prepares Xcode, Python and CMake, runs setup, and then
+runs `tools/install.py`, which picks the device, team and bundle ID, builds with
+`xcodebuild`, installs, and launches. After setup you can run it directly:
+
+```sh
+.venv/bin/python tools/install.py                       # remembered settings
+.venv/bin/python tools/install.py --bundle-id com.example.factorio --no-launch
+```
+
+The build log is `reports/install-build.log`.
+
+### With Xcode
+
+1. `open FactorioProbe.xcodeproj`
+2. In the **FactorioProbe** target's **Signing & Capabilities**, enable
+   **Automatically manage signing**, select your **Team**, and enter a unique
+   **Bundle Identifier** such as `com.yourname.factorio`. The identifier is also
+   applied to the generated app.
+3. Select the **FactorioProbe** scheme and your connected **physical device**.
+   For iPhone Duo, unfold it first.
+4. **Product → Run** (⌘R).
+
+The first build downloads and compiles SDL, generates the import audit, adapts a
+copy of the original executable, and bundles the local game data, including
+installed expansions. It takes time and several GB of disk. The build uses a
+shell-script phase: Xcode compiles a small placeholder, which is then replaced by
+the generated game executable (`tools/xcode_build.sh`). Edit files in `probe/`
+directly; you don't need to add them to **Compile Sources**.
+
+### From Terminal
+
+```sh
+export FACTORIO_TEAM_ID="YOUR_TEAM_ID"
+export FACTORIO_BUNDLE_ID="com.yourname.factorio"
+
+xcodebuild \
+  -project FactorioProbe.xcodeproj \
+  -scheme FactorioProbe \
+  -configuration Debug \
+  -sdk iphoneos \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath build/Xcode \
+  DEVELOPMENT_TEAM="$FACTORIO_TEAM_ID" \
+  PRODUCT_BUNDLE_IDENTIFIER="$FACTORIO_BUNDLE_ID" \
+  -allowProvisioningUpdates build
+
+.venv/bin/python tools/verify.py \
+  --signed-app build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app \
+  --bundle-id "$FACTORIO_BUNDLE_ID"
+
+xcrun devicectl list devices
+export FACTORIO_DEVICE_ID="YOUR_DEVICE_IDENTIFIER"
+xcrun devicectl device install app --device "$FACTORIO_DEVICE_ID" \
+  build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app
+xcrun devicectl device process launch --device "$FACTORIO_DEVICE_ID" "$FACTORIO_BUNDLE_ID"
+```
+
+The installable product is
+`build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app`.
+`build/iphoneos/FactorioProbe.app` is only ad hoc signed and can't be installed
+on a physical device. Installing replaces an existing app with the same bundle
+ID; keep the same ID so the app's saves are kept.
+
+### App data
+
+Saves are in the app container at `Documents/Factorio/user/saves`, and the
+configuration at `Documents/Factorio/config.ini`; container-dependent paths are
+adjusted at startup. Back up saves and copy the current log with:
+
+```sh
+xcrun devicectl device copy from --device "$FACTORIO_DEVICE_ID" \
+  --domain-type appDataContainer --domain-identifier "$FACTORIO_BUNDLE_ID" \
+  --source Documents/Factorio/user/saves --destination build/save-backup-01
+
+xcrun devicectl device copy from --device "$FACTORIO_DEVICE_ID" \
+  --domain-type appDataContainer --domain-identifier "$FACTORIO_BUNDLE_ID" \
+  --source Documents/Factorio/user/factorio-current.log --destination reports/device-current.log
+```
+
+Logs contain local paths and device details; review them before sharing.
 
 ## Check a build without Xcode signing
 
@@ -25,7 +166,7 @@ graphical device test.
 ## Small simulation probe on a device
 
 Save your game before terminating a running app. Set `FACTORIO_DEVICE_ID` and
-`FACTORIO_BUNDLE_ID` as described in the README; the development-signed app must
+`FACTORIO_BUNDLE_ID` as in [From Terminal](#from-terminal); the development-signed app must
 already be installed.
 
 ```sh
@@ -95,7 +236,7 @@ actual game response by inspecting the images.
 
 On the iPhone Duo, XCTest may capture its primary/outer display instead of the
 active inner game display. For Duo graphics checks, use the
-[inner-display screenshot procedure](IPHONE_DUO.md#physical-display-check-and-simulator-limits).
+[inner-display screenshot procedure](IPHONE_DUO.md#checking-the-display-developers).
 
 The helper uses fresh DerivedData for each run. This avoids an issue observed
 in the original project where a reused test runner had inconsistent signatures.
@@ -106,12 +247,12 @@ xcrun devicectl device uninstall app \
   --device "$FACTORIO_DEVICE_ID" local.factorio.probesnapshot.xctrunner
 ```
 
-## Simulator CLI (optional)
+## Simulator checks
 
 ### iPhone Duo simulator checks
 
-The iPhone Duo profile requires **Xcode 27.1 and the iOS 27.1 simulator runtime**.
-An iOS 27.0 runtime cannot boot this profile. If multiple Xcode versions are
+The iPhone Duo profile requires an Xcode with the matching iOS simulator runtime
+(27.1 or later); an iOS 27.0 runtime cannot boot it. If multiple Xcode versions are
 installed, set `DEVELOPER_DIR` to the desired app's `Contents/Developer` directory.
 Use `xcrun simctl list devices available` to obtain the simulator UDID.
 
@@ -129,8 +270,9 @@ xcrun simctl launch --console "$FACTORIO_SIMULATOR_ID" "$FACTORIO_BUNDLE_ID" --p
 
 The separate UIKit control harness exercises the production `TouchControls.m`
 without loading the game renderer. It checks safe-area bounds, control overlaps,
-keyboard bounds/visibility, cursor coordinates after resizing, and release of
-held input. It also checks that a mouse button remains down until touch-up.
+keyboard bounds/visibility, the portrait control deck and the game-view space it
+reserves, cursor coordinates after resizing, hardware-cursor drawing, release of
+held input, and that a mouse button remains down until touch-up.
 SDL input endpoints are recording sinks in this harness; it does not
 prove in-game input integration or graphical gameplay.
 
@@ -139,9 +281,9 @@ prove in-game input integration or graphical gameplay.
 ```
 
 Results and rendered control screenshots are copied to `reports/touch-controls/`.
-Eight cases passed on the iPhone Duo / iOS 27.1 simulator: seven representative
-window sizes, including the inner display, and the simulator's actual window/safe
-area.
+Nine cases pass on the iPhone Duo / iOS 27.1 simulator: eight representative
+window sizes, including the inner display in landscape and portrait, and the
+simulator's actual window/safe area.
 The 2.0.77 Space Age map creation and 120-update probe also passed, matching the
 Mac and physical iPad checksum **2376201887**. A 2.1.23 Space Age probe matched
 the Mac and physical iPhone checksum **4032494708**. Simulator timing is not a
@@ -213,14 +355,32 @@ exports as well as the earlier `arm64-ios` exports. Catalyst and macOS exports
 remain excluded. Small standalone TBD fixtures test that discovery and library
 reexports without requiring an installed SDK.
 
-## Check the repository before uploading
+## Troubleshooting
 
-After a local `git init`, use `git status --short --ignored` to see which files
-are excluded. Check `git diff --cached --stat` before committing. Generated
-copies of the original executable, SDL downloads, game assets, diagnostic
-reports, and local signing files do not belong in the source repository.
-A fresh checkout must be able to generate them locally.
+| Problem | Next step |
+|---|---|
+| Original hash doesn't match | Provide your own exact supported game version; don't bypass the check |
+| `.venv/bin/python` is missing | Run `python3 tools/setup.py` |
+| `cmake` is missing only in Xcode | Rerun setup in Terminal; it saves the absolute CMake path |
+| Download or SDL hash check fails | Check the connection; remove only the downloaded SDL archive under `build/vendor/` and rebuild; keep hash verification on |
+| `Signing requires a development team` | Select your team, automatic signing, and your own bundle ID |
+| Device is unavailable | Unlocked, USB trust granted, Developer Mode on, and Xcode finished preparing it |
+| App reported as untrusted | Check the signature with `codesign --verify --deep --strict`; use fresh DerivedData for a broken build; otherwise trust the developer on the device |
+| Menus respond incorrectly | Switch to Tap mode; hide the controls if buttons are in the way |
+| Duo simulator fails on BC3 / pixel format 134 | Known simulator graphics limitation; use a physical device |
+| `FACTORIO_PROBE_UNIMPLEMENTED` / crash | An unimplemented platform call was reached; save the log. The port doesn't cover every macOS function |
 
-No automatic deployment, GitHub upload, release upload, or CI download of
-Factorio is configured. The build reads only your existing local installation
-and downloads only the specified SDL version as a build dependency.
+Build details are in Xcode's build log, `reports/install-build.log`, and
+`reports/sdl-configure-iphoneos.log` / `reports/sdl-build-iphoneos.log`.
+
+## Before committing
+
+`build/`, `reports/`, `.venv/`, `.local-config.json`, signed apps, game files,
+certificates and Xcode user settings are ignored. Use
+`git status --short --ignored` to see what is excluded and check
+`git diff --cached --stat` before committing. Don't add those files through
+GitHub's web upload either; `.gitignore` doesn't protect files you select there.
+A fresh checkout must be able to generate everything locally.
+
+No CI, release upload, or download of Factorio is configured. The build reads
+only your local installation and downloads only the pinned SDL release.

@@ -28,7 +28,10 @@ On phones, SDL uses the window's safe-area insets at the top and sides, with a
 match the Duo's top margin, even though its reported bottom safe-area inset is
 larger. The UIWindow stays full size and supplies the dark border. Factorio
 places its own HUD against the drawable edges, so the margins keep those panels
-clear of rounded corners.
+clear of rounded corners. In portrait, the overlay reserves the lower part of
+the window for its control deck through `FPISetReservedBottom`, and SDL's view
+frame calculation adds that reserve to the bottom margin, so the game renders
+above the deck and receives an ordinary resize.
 Cursor and mining touches are converted through the actual Metal view frame.
 
 The facade libraries preserve the original dyld library ordinals. Other missing
@@ -49,8 +52,9 @@ implemented on iOS.
 | `probe/MetalCompat.m` | Supply the missing macOS depth-format query |
 | `probe/BitmapCompat.m` | Required NSBitmapImageRep/NSColorSpace operations using ImageIO/RGBA8 |
 | `probe/PlatformFallbacks.m` | Report OpenCL and Steam as unavailable |
-| `probe/TouchControls.m` | English UIKit buttons, movement, keyboard, and visible touch cursor |
-| `probe/SDLInputBridge.c` | Keep events and polled input state consistent through SDL |
+| `probe/TouchControls.m` | Touch overlay, portrait deck, on-screen keyboard, cursor, and Bluetooth hardware handling |
+| `probe/SDLInputBridge.c` | Send overlay and trackpad input through SDL's event path; hold the portrait reserve |
+| `tools/install.py`, `Install Factorio.command` | One-step device selection, signing, build, install and launch |
 | `tools/verify.py` | Check the original hash, patch provenance, platforms, and signatures |
 
 ## Additional adaptations
@@ -61,6 +65,18 @@ engine and its Metal renderer are preserved. On the tested
 M1 iPad, the compatibility layer implements the missing
 `isDepth24Stencil8PixelFormatSupported` method by returning `NO`, causing the
 original renderer to select its alternative depth format.
+
+## Hardware input
+
+SDL forwards GameController mouse (`GCMouse`) movement only in relative mode.
+The overlay chains its own movement handler after SDL's and sends the deltas as
+ordinary motion, and asks for pointer lock while a mouse is connected; iPad
+grants it, iPhone refuses. On iPhone, a trackpad's pointer comes from
+AssistiveTouch as hover and indirect-pointer touches. iOS 27.1 on iPhone Duo
+delivers AssistiveTouch's pointer and left-click tap only to the outer display,
+so on 27.1 the overlay draws its own arrow from hover and lets the trackpad's
+right button click; iOS 27.2 fixes this and both workarounds switch off there.
+Factorio starts without `--nogamepad`, so its own controller support is active.
 
 Base-game assets are copied from the local installation into the app bundle.
 Configuration and user data are stored under `Documents/Factorio` in the private
@@ -95,11 +111,13 @@ on the physical Duo. The objective panel and bottom HUD were visible in the
 previous 34-point-bottom build, and the current build's menu rendered correctly.
 Extended gameplay remains untested.
 
+On the physical iPhone Duo, a Bluetooth keyboard and a trackpad through
+AssistiveTouch were used in play on iOS 27.1 and 27.2 RC2.
+
 Complex factories, many shader and texture paths, color fidelity, the full range
-of building actions involving multiple fingers, physical external keyboards and
-mice, and long-term behavior remain unverified. Bitmap compatibility reduces
-16-bit images to 8 bits. Steam features, controllers, and Space Age are not
-established as complete. Multiplayer has not been tested. The app still displays
+of building actions involving multiple fingers, controllers, mice on iPad, and
+long-term behavior remain unverified. Bitmap compatibility reduces
+16-bit images to 8 bits. Steam features and Space Age are not established as complete. Multiplayer has not been tested. The app still displays
 the original macOS executable's version label; that label does not establish
 the build target.
 
