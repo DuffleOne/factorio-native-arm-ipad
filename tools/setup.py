@@ -8,7 +8,7 @@ import subprocess
 import sys
 import venv
 from pathlib import Path
-from config import ROOT, CONFIG_PATH, DEFAULT_APP, validate_source
+from config import ROOT, CONFIG_PATH, DEFAULT_APP, SUPPORTED_SOURCES, validate_source
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -20,9 +20,10 @@ def main():
         parser.error('Run natively on an Apple Silicon Mac (not under Rosetta).')
     app = args.app.expanduser().resolve()
     try:
-        validate_source(app)
+        digest = validate_source(app)
     except ValueError as error:
         parser.error(str(error))
+    print('Factorio source:', SUPPORTED_SOURCES[digest], flush=True)
     cmake = shutil.which('cmake')
     if not cmake:
         parser.error('CMake is missing. Install it and ensure cmake is in PATH, then retry.')
@@ -38,7 +39,7 @@ def main():
     subprocess.run([str(python), '-m', 'pip', 'install', '-r', str(ROOT / 'requirements.txt')], check=True)
     CONFIG_PATH.write_text(json.dumps({'factorio_app': str(app), 'cmake': cmake}, indent=2) + '\n')
     print('\nSetup complete. Local paths are saved in ignored .local-config.json.')
-    print('Open FactorioProbe.xcodeproj, select your development team and connected iPad, then Run.')
+    print('Open FactorioProbe.xcodeproj, select your development team and connected iPhone or iPad, then Run.')
 
 if __name__ == '__main__':
     main()

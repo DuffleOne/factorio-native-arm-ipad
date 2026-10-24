@@ -1,5 +1,18 @@
 #import <UIKit/UIKit.h>
 #include "SDL.h"
+#if FPI_SDL_MAJOR == 3
+#define FPI_MOD_CTRL SDL_KMOD_CTRL
+#define FPI_MOD_ALT SDL_KMOD_ALT
+#define FPI_MOD_GUI SDL_KMOD_GUI
+#define FPI_MOD_SHIFT SDL_KMOD_SHIFT
+#define FPI_MOD_CAPS SDL_KMOD_CAPS
+#else
+#define FPI_MOD_CTRL KMOD_CTRL
+#define FPI_MOD_ALT KMOD_ALT
+#define FPI_MOD_GUI KMOD_GUI
+#define FPI_MOD_SHIFT KMOD_SHIFT
+#define FPI_MOD_CAPS KMOD_CAPS
+#endif
 
 extern void FPIKeyboard(int scan,int down);
 extern void FPIMouseButton(int button,int down);
@@ -21,9 +34,9 @@ extern int FPIGetPointer(float *x,float *y);
     if (self.inputHeld==down) return;
     self.inputHeld=down;
     if (self.scan) FPIKeyboard(self.scan,down);
-    if (down && self.text && !(SDL_GetModState()&(KMOD_CTRL|KMOD_ALT|KMOD_GUI))) {
-        BOOL shift=(SDL_GetModState()&KMOD_SHIFT)!=0;
-        BOOL caps=(SDL_GetModState()&KMOD_CAPS)!=0;
+    if (down && self.text && !(SDL_GetModState()&(FPI_MOD_CTRL|FPI_MOD_ALT|FPI_MOD_GUI))) {
+        BOOL shift=(SDL_GetModState()&FPI_MOD_SHIFT)!=0;
+        BOOL caps=(SDL_GetModState()&FPI_MOD_CAPS)!=0;
         NSString *text=(shift!=caps) ? self.text.uppercaseString : self.text;
         if (shift && self.text.length==1) {
             NSString *plain=@"`1234567890-=[]\\;',./";
@@ -68,8 +81,9 @@ extern int FPIGetPointer(float *x,float *y);
     [[UIColor colorWithWhite:0.08 alpha:0.55] setFill];
     [[UIBezierPath bezierPathWithOvalInRect:CGRectInset(self.bounds,2,2)] fill];
     CGFloat r=self.bounds.size.width/2;
+    CGFloat thumb=MIN(24,r*0.32), travel=r-thumb-4;
     [[UIColor colorWithWhite:1 alpha:0.55] setFill];
-    [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(r-24+self.offset.x*45,r-24+self.offset.y*45,48,48)] fill];
+    [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(r-thumb+self.offset.x*travel,r-thumb+self.offset.y*travel,thumb*2,thumb*2)] fill];
 }
 @end
 
@@ -97,11 +111,19 @@ extern int FPIGetPointer(float *x,float *y);
         [self.cursorUpdates addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     }
 }
+- (CGRect)gameRect {
+    UIView *game=self.window.rootViewController.view;
+    if (!game || !game.window) return self.bounds;
+    CGRect rect=[game convertRect:game.bounds toView:self];
+    return rect.size.width>0 && rect.size.height>0 ? rect : self.bounds;
+}
 - (void)refreshCursor {
     if (self.hidden || self.mode!=2) return;
     float x,y;
     if (!FPIGetPointer(&x,&y)) return;
-    CGPoint p=CGPointMake(x*self.bounds.size.width,y*self.bounds.size.height);
+    CGRect game=[self gameRect];
+    CGPoint p=CGPointMake(CGRectGetMinX(game)+x*game.size.width,
+                          CGRectGetMinY(game)+y*game.size.height);
     if (!CGPointEqualToPoint(p,self.cursorPoint)) { self.cursorPoint=p; [self setNeedsDisplay]; }
 }
 - (void)drawRect:(CGRect)rect {
@@ -125,7 +147,9 @@ extern int FPIGetPointer(float *x,float *y);
 }
 - (void)move:(UITouch *)touch {
     CGPoint p=[touch locationInView:self];
-    FPIPointer(p.x/self.bounds.size.width,p.y/self.bounds.size.height);
+    CGRect game=[self gameRect];
+    FPIPointer(MAX(0,MIN(1,(p.x-CGRectGetMinX(game))/game.size.width)),
+               MAX(0,MIN(1,(p.y-CGRectGetMinY(game))/game.size.height)));
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     [self move:touches.anyObject];
@@ -148,6 +172,7 @@ extern int FPIGetPointer(float *x,float *y);
 @property(nonatomic,strong) UILabel *modeHint;
 @property(nonatomic,strong) UIView *keyboard;
 @property(nonatomic,strong) NSMutableArray<NSArray<FPInputButton *> *> *keyRows;
+@property(nonatomic) CGSize previousLayoutSize;
 @end
 @implementation FPTouchOverlay
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
@@ -245,6 +270,8 @@ extern int FPIGetPointer(float *x,float *y);
     [self releaseInputs];
     self.keyboard.hidden=!self.keyboard.hidden;
     self.modeHint.hidden=!self.keyboard.hidden || self.pointerSurface.mode==0;
+    for (UIView *button in self.buttons) button.hidden=!self.expanded || !self.keyboard.hidden;
+    self.joystick.hidden=!self.expanded || !self.keyboard.hidden;
 }
 - (void)buildKeyboard {
     self.keyboard=[UIView new]; self.keyboard.hidden=YES;
@@ -290,26 +317,42 @@ extern int FPIGetPointer(float *x,float *y);
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat left=MAX(self.safeAreaInsets.left,12), bottom=self.bounds.size.height-MAX(self.safeAreaInsets.bottom,12)-72;
-    // Keep the tutorial/objective panel in the upper-left corner readable.
-    self.toggle.frame=CGRectMake((self.bounds.size.width-352)/2,MAX(self.safeAreaInsets.top,12),112,36);
-    self.modeButton.frame=CGRectOffset(self.toggle.frame,120,0);
-    self.keyboardToggle.frame=CGRectOffset(self.toggle.frame,240,0);
-    CGFloat hintWidth=MIN(440,self.bounds.size.width-32);
-    self.modeHint.frame=CGRectMake((self.bounds.size.width-hintWidth)/2,CGRectGetMaxY(self.toggle.frame)+6,hintWidth,44);
-    self.joystick.frame=CGRectMake(left,bottom-160,150,150);
+    if (!CGSizeEqualToSize(self.previousLayoutSize,CGSizeZero) &&
+        !CGSizeEqualToSize(self.previousLayoutSize,self.bounds.size)) [self releaseInputs];
+    self.previousLayoutSize=self.bounds.size;
+    UIEdgeInsets insets=self.safeAreaInsets;
+    CGRect area=UIEdgeInsetsInsetRect(self.bounds,UIEdgeInsetsMake(MAX(insets.top,16),MAX(insets.left,16),
+                                                               MAX(insets.bottom,16),MAX(insets.right,16)));
+    // Use the current view, including its safe area, as it changes between displays.
+    CGFloat toolbarWidth=MIN(352,area.size.width), toolbarButton=(toolbarWidth-16)/3;
+    self.toggle.frame=CGRectMake(CGRectGetMidX(area)-toolbarWidth/2,area.origin.y,toolbarButton,44);
+    self.modeButton.frame=CGRectOffset(self.toggle.frame,toolbarButton+8,0);
+    self.keyboardToggle.frame=CGRectOffset(self.toggle.frame,2*(toolbarButton+8),0);
+    CGFloat hintWidth=MIN(440,area.size.width);
+    self.modeHint.frame=CGRectMake(CGRectGetMidX(area)-hintWidth/2,CGRectGetMaxY(self.toggle.frame)+6,hintWidth,44);
     self.pointerSurface.frame=self.bounds;
-    CGFloat right=self.bounds.size.width-MAX(self.safeAreaInsets.right,12)-248;
-    NSUInteger rows=(self.buttons.count+2)/3;
+    [self.pointerSurface refreshCursor];
+    BOOL shortLandscape=area.size.width>area.size.height && area.size.height<500;
+    BOOL stacked=!shortLandscape && area.size.width<520;
+    NSUInteger columns=shortLandscape ? 6 : 3;
+    NSUInteger rows=(self.buttons.count+columns-1)/columns;
+    CGFloat stick=shortLandscape || stacked ? 112 : 150;
+    CGFloat gridWidth=shortLandscape ? MIN(500,area.size.width-stick-20) : MIN(stacked ? 338 : 248,area.size.width);
+    CGFloat gap=4, buttonWidth=(gridWidth-(columns-1)*gap)/columns;
+    CGFloat gridHeight=rows*44+(rows-1)*gap;
+    CGFloat gridX=stacked ? CGRectGetMidX(area)-gridWidth/2 : CGRectGetMaxX(area)-gridWidth;
+    CGFloat gridY=CGRectGetMaxY(area)-gridHeight;
+    self.joystick.frame=CGRectMake(area.origin.x,stacked ? gridY-stick-12 : CGRectGetMaxY(area)-stick,stick,stick);
     for (NSUInteger i=0;i<self.buttons.count;i++) {
-        NSUInteger index=i;
-        self.buttons[i].frame=CGRectMake(right+(index%3)*84,bottom-rows*44+(index/3)*44,80,40);
+        self.buttons[i].frame=CGRectMake(gridX+(i%columns)*(buttonWidth+gap),gridY+(i/columns)*48,buttonWidth,44);
     }
-    CGFloat width=MIN(900,self.bounds.size.width-32);
-    self.keyboard.frame=CGRectMake((self.bounds.size.width-width)/2,CGRectGetMaxY(self.toggle.frame)+10,width,288);
+    CGFloat width=MIN(900,area.size.width), keyboardTop=CGRectGetMaxY(self.toggle.frame)+10;
+    CGFloat height=MIN(288,CGRectGetMaxY(area)-keyboardTop);
+    self.keyboard.frame=CGRectMake(CGRectGetMidX(area)-width/2,keyboardTop,width,height);
+    CGFloat rowHeight=(height-12)/self.keyRows.count;
     for (NSUInteger row=0;row<self.keyRows.count;row++) {
         NSArray *keys=self.keyRows[row]; CGFloat keyWidth=(width-12)/keys.count;
-        for (NSUInteger col=0;col<keys.count;col++) ((UIView *)keys[col]).frame=CGRectMake(6+col*keyWidth,6+row*46,keyWidth-4,42);
+        for (NSUInteger col=0;col<keys.count;col++) ((UIView *)keys[col]).frame=CGRectMake(6+col*keyWidth,6+row*rowHeight,keyWidth-4,rowHeight-4);
     }
 }
 @end

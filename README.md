@@ -1,31 +1,48 @@
-# Factorio on iPad — experimental local port
+# Factorio on iPhone and iPad — experimental local port
 
-This repository builds a development-signed iPad app from **your own macOS
-installation of Factorio**. Game simulation, graphics, audio, and saves then run
-locally on the iPad. Playing requires no Mac or streaming connection; the Mac is
-needed to build, install, and later renew the app's signing profile.
+This repository builds a development-signed iOS app from **your own macOS
+installation of Factorio**. The game and its assets run locally on the device;
+the Mac is needed to build, install, and later renew the signing profile.
+
+The installed app is named **Factorio** and uses the gear icon from your local
+game installation. The Xcode project and internal executable remain named
+`FactorioProbe`.
+
+The build declares support for both iPhone and iPad. Its touch controls adapt
+to narrow, wide, and short landscape views, and release held inputs when the
+view resizes. Factorio 2.1.23 with Space Age reached gameplay on a physical
+iPhone Duo on iOS 27.1. Its game view now sits inside narrow dark margins to
+keep the HUD clear of the inner display's rounded corners. Complete gameplay and
+fold/unfold transitions remain experimental; see
+[local device and simulator checks](docs/DEVELOPMENT.md).
 
 The repository includes porting code, touch controls, Xcode projects, and build
 tools. **Factorio itself, game assets, prebuilt apps, certificates, and saved games
 are not included.** This is not an official client from Wube Software.
+
+For an iPhone Duo build, use these instructions with the
+[iPhone Duo guide](docs/IPHONE_DUO.md). It covers the inner display, Space Age
+assets, touch modes, and physical-device checks.
 
 ## Requirements and tested configuration
 
 | Component | Requirement / tested configuration |
 |---|---|
 | Mac | Apple Silicon; run Terminal natively as ARM64, not through Rosetta |
-| Xcode | Full Xcode installation with iOS SDK 26 or newer; tested: Xcode 26.3, SDK 26.2 |
+| Xcode | Full Xcode installation with iOS SDK 26 or newer; iPhone Duo full-screen layout needs Xcode 27.1 / iOS 27.1 SDK |
 | Python | 3.12 or newer; tested: 3.14 |
 | CMake | Available in Terminal; setup saves its path for Xcode |
 | iPad | iPadOS 26 or newer; graphics tested on an 11-inch iPad Pro **M1**, iPadOS 26.6.1 |
-| Signing | Your own Apple Account in Xcode, a development team, and a paired iPad |
-| Game | **Factorio 2.0.77, build 84539, macOS Steam, unmodified universal executable** |
+| iPhone | iOS 27.1 iPhone Duo for the current device build; Developer Mode enabled |
+| Signing | Your own Apple Account in Xcode, a development team, and a paired device |
+| Game | **Factorio 2.1.23, build 87750, macOS Steam, unmodified universal executable**; earlier 2.0.77 builds remain accepted |
 
 Other iPads and newer SDKs have not automatically been verified. The original
 Metal renderer requires suitable BC texture support, among other capabilities.
-The simulator cannot replace device testing: the tested simulator fails during
-graphical startup on the BC3_RGBA pixel format. Small game simulation tests
-already run there.
+The simulator cannot replace device testing: normal graphical startup falls
+back to OpenGL because its simulated GPU lacks the needed Metal family, and
+that OpenGL context cannot be created. The earlier Metal diagnostic bypass
+reached a BC3_RGBA texture-format failure. Small game simulation tests run there.
 
 On the M1 iPad, testing covered the menu, tutorial, movement, inventory, mining
 trees, text input, saving, and loading a saved game. Audio was confirmed on the
@@ -33,6 +50,13 @@ device. English on-screen controls and a visible touch cursor are included.
 Physical keyboard and mouse support is connected through SDL but has not yet been
 tested with real hardware. Large factories, the full range of building actions,
 and long-term stability remain unverified. See [Architecture and limitations](docs/ARCHITECTURE.md).
+
+On the physical iPhone Duo, Factorio 2.1.23 with the Space Age expansion loaded
+through its main menu and an early tutorial save. The active inner display is
+2853 × 2007 pixels; the current inset build uses a smaller 2757 × 1911
+Metal drawable inside it. The game uses low-quality texture compression on
+iPhone to keep the initial texture allocation down. This is still an
+experimental port.
 
 ## 1. Prepare the repository and tools
 
@@ -59,13 +83,29 @@ brew install python cmake
 ```
 
 The first build needs an internet connection to download PyYAML, SDL, and, if
-necessary, Apple signing profiles. SDL 2.30.9 is downloaded automatically from
-the official SDL repository and checked against a pinned SHA-256 hash.
+necessary, Apple signing profiles. The build downloads SDL 3.4.14 for Factorio
+2.1.23 or SDL 2.30.9 for Factorio 2.0.77 from the official SDL repository and
+checks the archive against a pinned SHA-256 hash.
 
 ## 2. Select your own Factorio app
 
-You need a complete installation of the supported macOS game version. Its
-executable must have this exact SHA-256 hash:
+You need a complete installation of one of the supported macOS game versions.
+The locally audited **Factorio 2.1.23 / build 87750 Steam** executable has this
+exact SHA-256 hash:
+
+```text
+42218e9676f36687282800e5b6336b049c0f0e45f0f71eb20f90c49ccdec4359
+```
+
+This build uses SDL 3.4.14 and 1,269 static redirects to its iOS backend. The
+source validator checks the entry point, SDL version, and unused space before
+patching a copy. The original game is never modified. The 2.1.23 Space Age
+120-update probe produced checksum `4032494708` on the original Mac game,
+iPhone Duo simulator, and physical iPhone Duo. This verifies a small simulation,
+not graphical play.
+
+The earlier upstream-tested **Factorio 2.0.77 / build 84539** executable has
+this SHA-256 hash:
 
 ```text
 00b014d78df07e05ab1cee853904c8f7b3814ca652c043461a9d49fbad46cdf6
@@ -76,6 +116,23 @@ or just its ARM64 slice. The version number alone is insufficient: other
 distributions or executables that have been re-signed may differ.
 A dSYM file is not required for this build; the necessary symbols are read from
 the verified executable.
+
+This local checkout also accepts the following **experimental** Steam 2.0.77,
+build 84539 executable, inspected on October 7, 2026:
+
+```text
+90e2ebfdb5fd8b3966915f704a0ae99177c2af64ed9267c634ced42bff36d820
+```
+
+Its startup symbols, display-patch instructions and branch target, and padding
+for the documented 817 SDL redirects were checked locally. Setup repeats the
+layout checks. The build records the actual source hash, and verification rejects
+an app built from a different source. This is not a claim of device compatibility;
+full Space Age gameplay still needs testing. On October 7, 2026 this variant was
+built with Xcode 27, signed, installed on an M1 iPad Pro running iPadOS 27, and
+observed rendering the Space Age main menu and touch controls. Its 120-update
+Space Age probe matched the original Mac checksum `2376201887`. All other hashes
+remain rejected. See [local checks](docs/DEVELOPMENT.md#local-source-compatibility-tests).
 
 For the standard Steam installation, run:
 
@@ -96,14 +153,14 @@ That file is excluded by `.gitignore`. See also
 
 If you see `Unsupported Factorio executable`, stop and provide your own matching
 installation. **Do not remove the hash check:** the binary patches are specific
-to this executable. Other game versions require a new analysis.
+to the audited executables. Other game versions require a new analysis.
 This project does not modify the original app.
 
-## 3. Set up the iPad and signing
+## 3. Set up the iPhone or iPad and signing
 
-1. Connect the iPad to the Mac over USB, unlock it, and accept the trust prompt.
+1. Connect the device to the Mac over USB, unlock it, and accept the trust prompt.
    Xcode must recognize the device and finish preparing it.
-2. On the iPad, enable Developer Mode under
+2. On the device, enable Developer Mode under
    **Settings → Privacy & Security → Developer Mode** and confirm the requested
    restart. If the option is missing, pair the device with Xcode first.
 3. Sign in with your own Apple Account under
@@ -113,6 +170,11 @@ Apple documents these steps in
 [Enabling Developer Mode](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)
 and [Running apps on devices](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices).
 
+For iPhone Duo, unfold the device and select the connected **physical iPhone
+Duo** as the Xcode run destination. The tested graphical path uses its inner
+display in landscape. The Duo simulator can run the small command-line probes,
+but cannot render normal Factorio graphics; see the [Duo guide](docs/IPHONE_DUO.md).
+
 ```sh
 open FactorioProbe.xcodeproj
 ```
@@ -121,7 +183,7 @@ In Xcode, open the **FactorioProbe** target. Under **Signing & Capabilities**,
 enable **Automatically manage signing** and select your own **Team**.
 If necessary, enter your own unique **Bundle Identifier**, such as
 `com.yourname.factorioipad`. This identifier is also applied to the generated app.
-At the top, select the **FactorioProbe** scheme and your connected **physical iPad**.
+At the top, select the **FactorioProbe** scheme and your connected **physical device**.
 
 Xcode can also create a Personal Team. Check whether signing works with your own
 account configuration and how long its profile remains valid; no one else's
@@ -132,7 +194,7 @@ profiles are supplied with this repository.
 
 In Xcode, choose **Product → Run** / **⌘R**. The first build downloads and compiles
 SDL, generates the import audit, adapts a copy of the original executable, and
-bundles the local base-game assets. This takes time and several GB of free disk
+bundles the local game data, including installed expansion assets. This takes time and several GB of free disk
 space. Xcode then signs the app and libraries and installs them.
 
 The build intentionally uses a shell script phase: Xcode first compiles a small
@@ -145,7 +207,7 @@ Dismiss the Steam unavailable message with **Confirm**; Steam login and Steam
 features are unavailable. Close the changelog if it appears. Then start a
 tutorial or a base-game session from the main menu.
 
-Once installed, **Factorio Probe** can be opened directly on the iPad, and you can
+Once installed, **Factorio** can be opened directly on the device, and you can
 disconnect the USB cable. Normal play does not require the XCTest helper.
 Automatic crash-log uploading is disabled in the local build.
 
@@ -174,7 +236,7 @@ xcodebuild \
 The installable product is generated at
 `build/Xcode/Build/Products/Debug-iphoneos/FactorioProbe.app`.
 **`build/iphoneos/FactorioProbe.app` is only ad hoc signed and cannot be installed
-directly on the iPad.**
+directly on a physical device.**
 
 Verify the signature, game binary sections, and identifier:
 
@@ -184,11 +246,11 @@ Verify the signature, game binary sections, and identifier:
   --bundle-id "$FACTORIO_BUNDLE_ID"
 ```
 
-List devices and enter your iPad's identifier:
+List devices and enter your iPhone or iPad's identifier:
 
 ```sh
 xcrun devicectl list devices
-export FACTORIO_DEVICE_ID="YOUR_IPAD_IDENTIFIER"
+export FACTORIO_DEVICE_ID="YOUR_DEVICE_IDENTIFIER"
 
 xcrun devicectl device install app \
   --device "$FACTORIO_DEVICE_ID" \
@@ -231,14 +293,14 @@ mining and other inventory actions; Middle click for actions such as setting
 inventory filters. The exact effect depends on the game context and key bindings.
 Separate mouse buttons are not needed for ordinary tapping.
 
-Connect an external keyboard and mouse directly to the iPad and select
+Connect an external keyboard and mouse directly to the device and select
 **Hide controls**. SDL includes hardware keyboard, mouse movement, mouse button,
 and scrolling support, but the complete hardware workflow remains untested.
 Controllers are currently disabled.
 
 ## Saves, updates, and renewing signing
 
-Saves are stored inside the iPad app at `Documents/Factorio/user/saves`, and the
+Saves are stored inside the iPhone or iPad app at `Documents/Factorio/user/saves`, and the
 configuration is stored at `Documents/Factorio/config.ini`. After an update,
 container-dependent data paths are adjusted at startup.
 
@@ -258,7 +320,7 @@ Signing validity depends on your own development profile. When it expires,
 rebuild and reinstall using your own team. Do not delete the app for
 troubleshooting before backing up saves: uninstalling removes its local data.
 A Steam game update may cause the next build to fail the hash check; an already
-installed iPad app contains its own copy of the game assets.
+installed app contains its own copy of the game assets.
 
 ## Troubleshooting
 
@@ -267,12 +329,12 @@ installed iPad app contains its own copy of the game assets.
 | Original hash does not match | Provide your own exact supported game version; do not bypass the version check |
 | `.venv/bin/python` is missing | Run `python3 tools/setup.py` in the repository |
 | `cmake` is missing only in Xcode | Rerun setup in Terminal; it saves the absolute CMake path locally |
-| Download or SDL hash check fails | Check the connection; remove only `build/vendor/SDL-2.30.9.tar.gz` and rebuild; keep hash verification enabled |
+| Download or SDL hash check fails | Check the connection; remove only the relevant downloaded SDL archive under `build/vendor/` and rebuild; keep hash verification enabled |
 | `Signing requires a development team` | Select your team, automatic signing, and your own bundle ID in Signing & Capabilities |
-| iPad is unavailable | Check that it is unlocked, USB trust is granted, Developer Mode is enabled, and Xcode has finished preparing it |
-| App is reported as untrusted | First check the signature with `codesign --verify --deep --strict`; use fresh DerivedData for a broken build; if the signature is valid, follow the specific Xcode/iPad prompt |
+| iPhone or iPad is unavailable | Check that it is unlocked, USB trust is granted, Developer Mode is enabled, and Xcode has finished preparing it |
+| App is reported as untrusted | First check the signature with `codesign --verify --deep --strict`; use fresh DerivedData for a broken build; if the signature is valid, follow the specific Xcode/device prompt |
 | Menus respond incorrectly | Switch to Tap; temporarily use Hide controls if buttons are obscured |
-| Simulator fails on BC3 / pixel format 134 | Known graphics limitation; test on a supported physical iPad |
+| Duo simulator fails on BC3 / pixel format 134 | Known graphics limitation; test graphical play on a supported physical device |
 | `FACTORIO_PROBE_UNIMPLEMENTED` / crash | An unimplemented platform call was reached; save the log. The port does not cover every macOS function |
 
 Build details are available in Xcode's build log and locally in
