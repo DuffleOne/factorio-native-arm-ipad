@@ -585,7 +585,7 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
             [self.buttons removeLastObject];
             b.standalone=YES; b.layer.cornerRadius=7;
             b.latch=[@[@"Shift",@"Ctrl",@"Alt",@"Cmd"] containsObject:label];
-            if (label.length==1) b.text=label;
+            if (label.length==1 && !special[label]) b.text=label; // ⌫ and the arrows are keys, not text
             if ([label isEqual:@"Space"]) b.text=@" ";
             [b refreshAppearance];
             [self.keyboard addSubview:b]; [buttons addObject:b];
