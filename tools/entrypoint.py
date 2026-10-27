@@ -110,6 +110,21 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
         assert struct.unpack_from('<I',data,at)[0] == 0xaa1403e0
         struct.pack_into('<I',data,at,0x14000000|(((-152)>>2)&0x3ffffff))
         platform_patches.append(dict(name='skip macOS display-ID log suffix',offset=at,original_bytes='e00314aa'))
+        # The Mac build's curl takes the first system CA bundle that exists.
+        # On iOS /etc/ssl/cert.pem exists but the sandbox won't let the app
+        # read it, so factorio.com logins fail. Branch straight to the
+        # fallback, which uses the cacert.pem shipped in the game data.
+        pick = next(s for s in m.symbols() if s['name']=='__ZN10CurlHandle20pickCertFileLocationEv')
+        at = pick['address']-base+0x30
+        adrp, add = struct.unpack_from('<II',data,at+0x144)
+        page = ((base+at+0x144)&~0xfff)+((((adrp>>5)&0x7ffff)<<2|(adrp>>29)&3)<<12)
+        message = b'Failed to find the system certificate authority file, using shipped file\0'
+        text = page+((add>>10)&0xfff)-base
+        if struct.unpack_from('<I',data,at)[0] == 0x14000006 and data[text:text+len(message)] == message:
+            struct.pack_into('<I',data,at,0x14000000|(0x13c>>2))
+            platform_patches.append(dict(name='use the shipped CA certificate file',offset=at,original_bytes='06000014'))
+        else:
+            print('Note: unrecognised CurlHandle::pickCertFileLocation; factorio.com login may fail on iOS')
         if simulator_metal:
             # Simulator reports neither Mac1 nor Apple7. This opt-in diagnostic
             # lets the real renderer expose its actual missing capabilities.
