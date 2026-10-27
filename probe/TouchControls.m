@@ -1,41 +1,6 @@
-#import <UIKit/UIKit.h>
-#import <GameController/GameController.h>
+// The overlay: builds the controls and lays them out over the game. See TouchControls.h.
+#import "TouchControls.h"
 #import <objc/runtime.h>
-#include "SDL.h"
-#if FPI_SDL_MAJOR == 3
-#define FPI_MOD_CTRL SDL_KMOD_CTRL
-#define FPI_MOD_ALT SDL_KMOD_ALT
-#define FPI_MOD_GUI SDL_KMOD_GUI
-#define FPI_MOD_SHIFT SDL_KMOD_SHIFT
-#define FPI_MOD_CAPS SDL_KMOD_CAPS
-#else
-#define FPI_MOD_CTRL KMOD_CTRL
-#define FPI_MOD_ALT KMOD_ALT
-#define FPI_MOD_GUI KMOD_GUI
-#define FPI_MOD_SHIFT KMOD_SHIFT
-#define FPI_MOD_CAPS KMOD_CAPS
-#endif
-
-extern void FPIKeyboard(int scan,int down);
-extern void FPIMouseButton(int button,int down);
-extern void FPIWheel(float y);
-extern void FPIText(const char *text);
-extern void FPIPointer(float x,float y);
-extern int FPIGetPointer(float *x,float *y);
-extern void FPIMouseDelta(float dx,float dy);
-extern void FPISetReservedBottom(float bottom);
-
-// Translucent dark chrome with one warm accent, so controls recede over the factory.
-static UIColor *FPSurface(void) { return [UIColor colorWithWhite:0.05 alpha:0.55]; }
-static UIColor *FPStroke(void) { return [UIColor colorWithWhite:1 alpha:0.16]; }
-static UIColor *FPAccent(void) { return [UIColor colorWithRed:1 green:0.65 blue:0.18 alpha:0.95]; }
-static UIColor *FPInk(void) { return [UIColor colorWithWhite:0.08 alpha:1]; }
-static UIImpactFeedbackGenerator *FPPressFeedback(void) {
-    static UIImpactFeedbackGenerator *generator;
-    static dispatch_once_t once;
-    dispatch_once(&once,^{ generator=[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight]; });
-    return generator;
-}
 
 // iOS delivers GCMouse movement only to a scene whose root view controller locks the
 // pointer, and SDL locks it only in relative mode. Ask for the lock whenever a mouse is
@@ -60,213 +25,6 @@ static void FPRequestPointerLock(UIViewController *controller,BOOL lock) {
 }
 
 static BOOL FPLeftButtonArrives;
-static NSNotificationName const FPInputChanged=@"FPInputChanged";
-
-@interface FPInputButton : UIButton
-@property(nonatomic) int scan;
-@property(nonatomic) int mouseButton;
-@property(nonatomic) int wheel;
-@property(nonatomic) BOOL inputHeld;
-@property(nonatomic) BOOL latch;
-@property(nonatomic) BOOL withCommand; // Adds Cmd to its key, for Copy and Paste.
-@property(nonatomic) BOOL addedCommand;
-@property(nonatomic) BOOL standalone; // Draws its own disc instead of sitting on a shared pill.
-@property(nonatomic) BOOL captioned;  // Icon above a small title.
-@property(nonatomic,copy) NSString *text;
-- (NSString *)typedText;
-- (void)refreshAppearance;
-@end
-@implementation FPInputButton
-// What the key types with the current Shift and Caps Lock state.
-- (NSString *)typedText {
-    BOOL shift=(SDL_GetModState()&FPI_MOD_SHIFT)!=0;
-    BOOL caps=(SDL_GetModState()&FPI_MOD_CAPS)!=0;
-    NSString *text=(shift!=caps) ? self.text.uppercaseString : self.text;
-    if (shift && self.text.length==1) {
-        NSString *plain=@"`1234567890-=[]\\;',./";
-        NSString *shifted=@"~!@#$%^&*()_+{}|:\"<>?";
-        NSRange index=[plain rangeOfString:self.text];
-        if (index.location!=NSNotFound) text=[shifted substringWithRange:NSMakeRange(index.location,1)];
-    }
-    return text;
-}
-- (void)sendDown:(BOOL)down {
-    if (self.inputHeld==down) return;
-    self.inputHeld=down;
-    if (down && self.withCommand && !(SDL_GetModState()&FPI_MOD_GUI)) { self.addedCommand=YES; FPIKeyboard(SDL_SCANCODE_LGUI,1); }
-    if (self.scan) FPIKeyboard(self.scan,down);
-    if (!down && self.addedCommand) { self.addedCommand=NO; FPIKeyboard(SDL_SCANCODE_LGUI,0); }
-    if (down && self.text && !(SDL_GetModState()&(FPI_MOD_CTRL|FPI_MOD_ALT|FPI_MOD_GUI))) FPIText(self.typedText.UTF8String);
-    if (self.mouseButton) FPIMouseButton(self.mouseButton,down);
-    if (self.wheel && down) FPIWheel(self.wheel);
-    if (down) [FPPressFeedback() impactOccurred];
-    [self refreshAppearance];
-    [NSNotificationCenter.defaultCenter postNotificationName:FPInputChanged object:self];
-}
-- (void)down { [self sendDown:self.latch ? !self.inputHeld : YES]; }
-- (void)up { if (!self.latch) [self sendDown:NO]; }
-- (void)setHighlighted:(BOOL)highlighted { [super setHighlighted:NO]; }
-- (void)refreshAppearance {
-    UIColor *ink=self.inputHeld ? FPInk() : UIColor.whiteColor;
-    self.backgroundColor=self.inputHeld ? FPAccent() : (self.standalone ? FPSurface() : UIColor.clearColor);
-    self.layer.borderWidth=self.standalone && !self.inputHeld ? 1 : 0;
-    self.tintColor=ink; [self setTitleColor:ink forState:UIControlStateNormal];
-    self.transform=self.inputHeld && !self.latch ? CGAffineTransformMakeScale(0.93,0.93) : CGAffineTransformIdentity;
-}
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    UIImage *image=self.imageView.image;
-    if (!self.captioned || !image) return;
-    CGSize size=self.bounds.size, icon=image.size;
-    CGFloat captionHeight=ceil(self.titleLabel.font.lineHeight), top=floor((size.height-icon.height-captionHeight)/2);
-    self.imageView.frame=CGRectMake(floor((size.width-icon.width)/2),top,icon.width,icon.height);
-    self.titleLabel.frame=CGRectMake(3,top+icon.height,size.width-6,captionHeight);
-}
-@end
-
-@interface FPJoystick : UIView
-@property(nonatomic) CGPoint offset;
-@property(nonatomic) int direction; // -1 at rest, else 0-7 clockwise from east.
-- (void)reset;
-- (void)updatePoint:(CGPoint)p;
-@end
-@implementation FPJoystick
-- (instancetype)initWithFrame:(CGRect)frame {
-    if ((self=[super initWithFrame:frame])) {
-        self.backgroundColor=UIColor.clearColor; self.opaque=NO; self.direction=-1;
-        self.contentMode=UIViewContentModeRedraw; self.accessibilityLabel=@"Movement stick";
-    }
-    return self;
-}
-static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==a || direction==b || direction==c; }
-- (void)updatePoint:(CGPoint)p {
-    CGFloat radius=self.bounds.size.width/2;
-    CGFloat dx=(p.x-radius)/radius, dy=(p.y-radius)/radius, length=hypot(dx,dy);
-    if (length>1) { dx/=length; dy/=length; }
-    self.offset=CGPointMake(dx,dy);
-    // Eight equal sectors make diagonals as easy to hold as the cardinal directions.
-    int direction=length<0.22 ? -1 : ((int)lround(atan2(dy,dx)/(M_PI/4))+8)%8;
-    if (direction!=self.direction) {
-        self.direction=direction;
-        FPIKeyboard(SDL_SCANCODE_D,FPDirectionHas(direction,7,0,1));
-        FPIKeyboard(SDL_SCANCODE_S,FPDirectionHas(direction,1,2,3));
-        FPIKeyboard(SDL_SCANCODE_A,FPDirectionHas(direction,3,4,5));
-        FPIKeyboard(SDL_SCANCODE_W,FPDirectionHas(direction,5,6,7));
-    }
-    [self setNeedsDisplay];
-}
-- (void)reset { [self updatePoint:CGPointMake(self.bounds.size.width/2,self.bounds.size.height/2)]; }
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    CGFloat r=self.bounds.size.width/2+18;
-    return hypot(point.x-self.bounds.size.width/2,point.y-self.bounds.size.height/2)<=r;
-}
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self updatePoint:[touches.anyObject locationInView:self]]; }
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self touchesBegan:touches withEvent:event]; }
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self reset]; }
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self reset]; }
-- (void)drawRect:(CGRect)rect {
-    CGFloat r=self.bounds.size.width/2;
-    UIBezierPath *base=[UIBezierPath bezierPathWithOvalInRect:CGRectInset(self.bounds,1,1)];
-    [FPSurface() setFill]; [base fill];
-    [FPStroke() setStroke]; base.lineWidth=1; [base stroke];
-    CGContextRef context=UIGraphicsGetCurrentContext();
-    const int lit[4][3]={{7,0,1},{1,2,3},{3,4,5},{5,6,7}};
-    for (int i=0;i<4;i++) {
-        CGContextSaveGState(context);
-        CGContextTranslateCTM(context,r,r); CGContextRotateCTM(context,i*M_PI/2);
-        CGFloat x=r-r*0.16, size=r*0.07;
-        UIBezierPath *chevron=[UIBezierPath bezierPath];
-        [chevron moveToPoint:CGPointMake(x-size,-size*1.6)];
-        [chevron addLineToPoint:CGPointMake(x+size,0)];
-        [chevron addLineToPoint:CGPointMake(x-size,size*1.6)];
-        chevron.lineWidth=2; chevron.lineCapStyle=kCGLineCapRound; chevron.lineJoinStyle=kCGLineJoinRound;
-        [(FPDirectionHas(self.direction,lit[i][0],lit[i][1],lit[i][2]) ? FPAccent() : [UIColor colorWithWhite:1 alpha:0.35]) setStroke];
-        [chevron stroke];
-        CGContextRestoreGState(context);
-    }
-    CGFloat thumb=r*0.4, travel=r-thumb-r*0.08;
-    CGRect knob=CGRectMake(r-thumb+self.offset.x*travel,r-thumb+self.offset.y*travel,thumb*2,thumb*2);
-    UIBezierPath *path=[UIBezierPath bezierPathWithOvalInRect:knob];
-    [[UIColor colorWithWhite:1 alpha:self.direction<0 ? 0.55 : 0.9] setFill]; [path fill];
-    [[UIColor colorWithWhite:0 alpha:0.25] setStroke]; path.lineWidth=1; [path stroke];
-}
-@end
-
-@interface FPPointerSurface : UIView
-@property(nonatomic) int mode;
-@property(nonatomic) BOOL hardwareCursor; // A Bluetooth mouse or trackpad is connected.
-@property(nonatomic) BOOL mining;
-@property(nonatomic) CGPoint cursorPoint;
-@property(nonatomic,strong) CADisplayLink *cursorUpdates;
-- (void)reset;
-@end
-@implementation FPPointerSurface
-- (instancetype)initWithFrame:(CGRect)frame {
-    if ((self=[super initWithFrame:frame])) {
-        self.backgroundColor=UIColor.clearColor; self.opaque=NO;
-        self.contentMode=UIViewContentModeRedraw;
-    }
-    return self;
-}
-- (void)didMoveToWindow {
-    [super didMoveToWindow];
-    [self.cursorUpdates invalidate]; self.cursorUpdates=nil;
-    if (self.window) {
-        self.cursorUpdates=[CADisplayLink displayLinkWithTarget:self selector:@selector(refreshCursor)];
-        self.cursorUpdates.preferredFramesPerSecond=30;
-        [self.cursorUpdates addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
-    }
-}
-- (CGRect)gameRect {
-    UIView *game=self.window.rootViewController.view;
-    if (!game || !game.window) return self.bounds;
-    CGRect rect=[game convertRect:game.bounds toView:self];
-    return rect.size.width>0 && rect.size.height>0 ? rect : self.bounds;
-}
-- (BOOL)drawsCursor { return self.mode==2 || self.hardwareCursor; }
-- (void)refreshCursor {
-    if (self.hidden || !self.drawsCursor) return;
-    float x,y;
-    if (!FPIGetPointer(&x,&y)) return;
-    CGRect game=[self gameRect];
-    CGPoint p=CGPointMake(CGRectGetMinX(game)+x*game.size.width,
-                          CGRectGetMinY(game)+y*game.size.height);
-    if (!CGPointEqualToPoint(p,self.cursorPoint)) { self.cursorPoint=p; [self setNeedsDisplay]; }
-}
-- (void)drawRect:(CGRect)rect {
-    if (!self.drawsCursor) return;
-    // Arrow tip is the exact SDL click position, including after lifting a finger.
-    CGContextRef context=UIGraphicsGetCurrentContext();
-    CGContextSaveGState(context);
-    CGContextTranslateCTM(context,self.cursorPoint.x,self.cursorPoint.y);
-    UIBezierPath *arrow=[UIBezierPath bezierPath];
-    [arrow moveToPoint:CGPointZero];
-    [arrow addLineToPoint:CGPointMake(1,28)];
-    [arrow addLineToPoint:CGPointMake(8,21)];
-    [arrow addLineToPoint:CGPointMake(14,34)];
-    [arrow addLineToPoint:CGPointMake(20,31)];
-    [arrow addLineToPoint:CGPointMake(14,18)];
-    [arrow addLineToPoint:CGPointMake(24,17)]; [arrow closePath];
-    arrow.lineWidth=3; arrow.lineJoinStyle=kCGLineJoinRound;
-    [UIColor.blackColor setStroke]; [arrow stroke];
-    [UIColor.whiteColor setFill]; [arrow fill];
-    CGContextRestoreGState(context);
-}
-- (void)move:(UITouch *)touch {
-    CGPoint p=[touch locationInView:self];
-    CGRect game=[self gameRect];
-    FPIPointer(MAX(0,MIN(1,(p.x-CGRectGetMinX(game))/game.size.width)),
-               MAX(0,MIN(1,(p.y-CGRectGetMinY(game))/game.size.height)));
-}
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self move:touches.anyObject];
-    if (self.mode==1) { self.mining=YES; FPIMouseButton(SDL_BUTTON_RIGHT,YES); }
-}
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self move:touches.anyObject]; }
-- (void)reset { if (self.mining) FPIMouseButton(SDL_BUTTON_RIGHT,NO);self.mining=NO; }
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self reset]; }
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self reset]; }
-@end
 
 @interface FPTouchOverlay : UIView <UITextFieldDelegate>
 @property(nonatomic,strong) NSMutableArray<FPInputButton *> *buttons;
@@ -316,8 +74,6 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
     else [b setTitle:title forState:UIControlStateNormal];
     b.accessibilityLabel=title;
     b.layer.borderColor=FPStroke().CGColor;
-    [b addTarget:b action:@selector(down) forControlEvents:UIControlEventTouchDown];
-    [b addTarget:b action:@selector(up) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
     [b refreshAppearance];
     [self.buttons addObject:b]; [self addSubview:b]; return b;
 }
@@ -379,13 +135,12 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
                        [self clusterButton:@"Switch gun" caption:@"Gun" symbol:@"arrow.left.arrow.right" scan:SDL_SCANCODE_TAB],
                        middle];
 
-        self.modeButtons=@[[self systemButton:@"hand.tap" label:@"Tap mode" action:@selector(selectMode:)],
-                           [self systemButton:@"hammer" label:@"Mine mode" action:@selector(selectMode:)],
-                           [self systemButton:@"cursorarrow" label:@"Cursor mode" action:@selector(selectMode:)]];
+        self.modeButtons=@[[self systemButton:@"hand.tap" label:@"Direct mode" action:@selector(selectMode:)],
+                           [self systemButton:@"cursorarrow" label:@"Precise mode" action:@selector(selectMode:)]];
         self.keyboardToggle=[self systemButton:@"keyboard" label:@"Keyboard" action:@selector(toggleKeyboard)];
         self.typeToggle=[self systemButton:@"character.cursor.ibeam" label:@"Type with the iOS keyboard" action:@selector(toggleTextBar)];
         self.toggle=[self systemButton:@"eye.slash" label:@"Hide controls" action:@selector(toggleControls)];
-        for (UIButton *b in self.modeButtons) b.accessibilityHint=@"Switch between Tap, Mine and Cursor mode";
+        for (UIButton *b in self.modeButtons) b.accessibilityHint=@"Switch between Direct and Precise mode";
 
         self.modeHint=[UILabel new]; self.modeHint.alpha=0;
         self.modeHint.textColor=UIColor.whiteColor;
@@ -530,7 +285,7 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
     }
 }
 - (void)selectMode:(UIButton *)sender { [self setMode:(int)[self.modeButtons indexOfObject:sender]]; }
-- (void)cycleMode { [self setMode:(self.pointerSurface.mode+1)%3]; }
+- (void)cycleMode { [self setMode:(self.pointerSurface.mode+1)%2]; }
 - (void)setMode:(int)mode {
     [self releaseInputs];
     self.pointerSurface.mode=mode;
@@ -538,9 +293,8 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
     [self.pointerSurface refreshCursor]; [self.pointerSurface setNeedsDisplay];
     [self refreshModeButtons];
     [FPPressFeedback() impactOccurred];
-    [self showHint:@[@"Tap: touches go straight to the game.",
-                     @"Mine: hold on a tree or ore to mine it.\nSwitch back to Tap for menus.",
-                     @"Cursor: touch to aim, then Use or Mine acts at the arrow.\nTo drag, hold a button and slide another finger."][mode]];
+    [self showHint:@[@"Direct: touches go straight to the game.",
+                     @"Precise: touch to aim, then Use or Mine acts at the arrow.\nTo drag, hold a button and slide another finger."][mode]];
 }
 - (void)showHint:(NSString *)text {
     self.modeHint.text=text;
@@ -557,9 +311,9 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
     for (UIView *v in self.modeButtons) v.hidden=!self.expanded;
     self.keyboardToggle.hidden=!self.expanded; self.typeToggle.hidden=!self.expanded; self.systemDivider.hidden=!self.expanded;
     // The surface captures touches only for Mine and Cursor; it still draws the arrow for a hardware mouse.
-    BOOL captures=self.expanded && self.pointerSurface.mode!=0;
+    BOOL captures=self.expanded && self.pointerSurface.mode!=FPTouchDirect;
     self.pointerSurface.userInteractionEnabled=captures;
-    self.pointerSurface.hidden=!captures && !self.pointerSurface.hardwareCursor && !(self.expanded && self.pointerSurface.mode==2);
+    self.pointerSurface.hidden=!captures && !self.pointerSurface.hardwareCursor && !(self.expanded && self.pointerSurface.mode==FPTouchPrecise);
     self.keyboardToggle.backgroundColor=self.keyboard.hidden ? UIColor.clearColor : FPAccent();
     self.keyboardToggle.tintColor=self.keyboard.hidden ? UIColor.whiteColor : FPInk();
     self.typeToggle.backgroundColor=self.textBar.hidden ? UIColor.clearColor : FPAccent();
@@ -663,7 +417,7 @@ static CGRect FPLayoutPill(UIView *pill,NSArray<UIView *> *items,CGPoint origin,
     return frame;
 }
 - (NSArray<UIView *> *)systemItems {
-    return self.expanded ? @[self.modeButtons[0],self.modeButtons[1],self.modeButtons[2],self.keyboardToggle,self.typeToggle,self.toggle] : @[self.toggle];
+    return self.expanded ? @[self.modeButtons[0],self.modeButtons[1],self.keyboardToggle,self.typeToggle,self.toggle] : @[self.toggle];
 }
 - (CGFloat)systemWidthItem:(CGFloat)item pad:(CGFloat)pad divider:(CGFloat)divider {
     return FPPillLength(self.systemItems.count,item,pad)+(self.expanded ? divider : 0);
@@ -674,8 +428,8 @@ static CGRect FPLayoutPill(UIView *pill,NSArray<UIView *> *items,CGPoint origin,
     CGRect pill=FPLayoutPill(self.systemPill,system,origin,item,pad,NO);
     if (!self.expanded) return pill;
     pill.size.width+=divider; self.systemPill.frame=pill;
-    for (NSUInteger i=3;i<system.count;i++) system[i].frame=CGRectOffset(system[i].frame,divider,0);
-    self.systemDivider.frame=CGRectMake(round(CGRectGetMaxX(self.modeButtons[2].frame)+1+divider/2-0.5),pill.origin.y+pad+item*0.2,1,item*0.6);
+    for (NSUInteger i=self.modeButtons.count;i<system.count;i++) system[i].frame=CGRectOffset(system[i].frame,divider,0);
+    self.systemDivider.frame=CGRectMake(round(CGRectGetMaxX(self.modeButtons.lastObject.frame)+1+divider/2-0.5),pill.origin.y+pad+item*0.2,1,item*0.6);
     return pill;
 }
 // Primary action at the corner point, secondary actions on two arcs around it. Returns the cluster's top.

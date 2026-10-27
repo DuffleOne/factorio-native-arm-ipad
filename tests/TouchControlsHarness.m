@@ -24,6 +24,8 @@ SDL_Keymod SDL_GetModState(void) { return KMOD_NONE; }
 #endif
 SDL_Scancode SDL_GetScancodeFromName(const char *name) { return SDL_SCANCODE_UNKNOWN; }
 SDL_Window *SDL_GetKeyboardFocus(void) { return NULL; }
+#include "../probe/TouchInput.m"
+#include "../probe/TouchGestures.m"
 #include "../probe/TouchControls.m"
 
 @interface LayoutOverlay : FPTouchOverlay
@@ -129,7 +131,7 @@ static void checkLayout(LayoutOverlay *overlay, NSString *name) {
     }
     [findButton(overlay,SDL_SCANCODE_E,0) sendDown:YES];
     [overlay.joystick updatePoint:CGPointMake(overlay.joystick.bounds.size.width,overlay.joystick.bounds.size.height/2)];
-    overlay.pointerSurface.mining=YES; FPIMouseButton(SDL_BUTTON_RIGHT,YES);
+    [findButton(overlay,0,SDL_BUTTON_RIGHT) sendDown:YES];
     check(keys[SDL_SCANCODE_E] && keys[SDL_SCANCODE_D] && mouseButtons[SDL_BUTTON_RIGHT],@"input held before resize");
     overlay.frame=CGRectMake(0,0,890,626);
     [overlay setNeedsLayout]; [overlay layoutIfNeeded];
