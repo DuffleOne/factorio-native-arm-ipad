@@ -26,8 +26,8 @@ static const int FPModScans[4][2]={{FPModShift,SDL_SCANCODE_LSHIFT},{FPModCtrl,S
                                    {FPModAlt,SDL_SCANCODE_LALT},{FPModCmd,SDL_SCANCODE_LGUI}};
 
 @interface FPModifierButton ()
-@property(nonatomic,readonly) BOOL active;  // armed, held, locked, or a finger on it
-- (void)clicked;
+- (BOOL)appliesToWheel:(BOOL)wheel;
+- (void)clicked:(BOOL)wheel;
 @end
 
 // Mouse buttons down through FPClick, each with the modifier keys pressed for it. A key stays
@@ -52,13 +52,15 @@ static BOOL FPKeyInUse(NSNumber *key) {
     for (NSArray *keys in FPClickKeys.objectEnumerator) if ([keys containsObject:key]) return YES;
     return NO;
 }
-// Presses the active modifiers' keys, in a fixed order, unless they are down already.
-static NSArray<NSNumber *> *FPPressModifiers(void) {
+// The modifiers' keys for a click or a wheel step, in a fixed order.
+static NSArray<NSNumber *> *FPActiveKeys(BOOL wheel) {
     NSMutableArray<NSNumber *> *keys=[NSMutableArray new];
-    for (FPModifierButton *m in FPModifiers) if (m.active && ![keys containsObject:@(m.scan)]) [keys addObject:@(m.scan)];
+    for (FPModifierButton *m in FPModifiers) if ([m appliesToWheel:wheel] && ![keys containsObject:@(m.scan)]) [keys addObject:@(m.scan)];
     [keys sortUsingSelector:@selector(compare:)];
-    for (NSNumber *key in keys) if (!FPKeyInUse(key) && !FPKeyDown(key.intValue)) { [FPPressedKeys addObject:key]; FPIKeyboard(key.intValue,1); }
     return keys;
+}
+static void FPPressKeys(NSArray<NSNumber *> *keys) {
+    for (NSNumber *key in keys) if (!FPKeyInUse(key) && !FPKeyDown(key.intValue)) { [FPPressedKeys addObject:key]; FPIKeyboard(key.intValue,1); }
 }
 static void FPReleaseModifiers(NSArray<NSNumber *> *keys) {
     for (NSNumber *key in keys.reverseObjectEnumerator)
@@ -71,7 +73,22 @@ static void FPDropKey(NSNumber *key) {
     }
     if ([FPPressedKeys containsObject:key]) { [FPPressedKeys removeObject:key]; FPIKeyboard(key.intValue,0); }
 }
-static void FPModifiersClicked(void) { for (FPModifierButton *m in FPModifiers.allObjects) [m clicked]; }
+static void FPModifiersClicked(BOOL wheel) { for (FPModifierButton *m in FPModifiers.allObjects) [m clicked:wheel]; }
+// Lets go of the keys clicks hold that a key tap or wheel step must not carry (Shift held for a
+// drag would turn Cmd+Z into redo), and returns them to press again after. Alt stays up instead:
+// pressed and released again with no click in between, it would toggle alt-mode.
+static NSArray<NSNumber *> *FPLiftKeys(NSSet<NSNumber *> *keep) {
+    NSMutableArray<NSNumber *> *lifted=[NSMutableArray new];
+    for (NSNumber *key in [FPPressedKeys.allObjects sortedArrayUsingSelector:@selector(compare:)].reverseObjectEnumerator) {
+        if ([keep containsObject:key]) continue;
+        if (key.intValue==SDL_SCANCODE_LALT) { FPDropKey(key); continue; }
+        [FPPressedKeys removeObject:key]; FPIKeyboard(key.intValue,0); [lifted addObject:key];
+    }
+    return lifted;
+}
+static void FPRestoreKeys(NSArray<NSNumber *> *keys) {
+    for (NSNumber *key in keys.reverseObjectEnumerator) { [FPPressedKeys addObject:key]; FPIKeyboard(key.intValue,1); }
+}
 
 // Only a button's first down and last up reach the game, with the modifiers around that pair.
 void FPClick(int button,BOOL down) {
@@ -90,24 +107,34 @@ void FPClick(int button,BOOL down) {
     // around nothing would reach the game bare (a bare Alt toggles alt-mode).
     BOOL taken=(SDL_GetMouseState(NULL,NULL)&(1u<<(button-1)))!=0;
     // Keys already down for another click went down before this button too, so they stay until it is up.
-    NSArray *keys=taken ? @[] : FPPressModifiers();
+    NSArray *keys=taken ? @[] : FPActiveKeys(NO);
+    FPPressKeys(keys);
     FPClickKeys[index]=taken ? keys : [[NSSet setWithArray:[keys arrayByAddingObjectsFromArray:FPPressedKeys.allObjects]].allObjects sortedArrayUsingSelector:@selector(compare:)];
     FPIMouseButton(button,1);
-    if (!taken) FPModifiersClicked();
+    if (!taken) FPModifiersClicked(NO);
 }
+// Only Alt goes round a wheel step (Alt+wheel cycles quality), and only held or locked: an armed
+// modifier waits for its click, and Ctrl+wheel may not zoom.
 void FPWheel(float y) {
     if (y==0) return;
     FPInputSetUp();
-    NSArray *keys=FPPressModifiers();
-    FPIWheel(y); FPReleaseModifiers(keys); FPModifiersClicked();
+    NSArray *keys=FPActiveKeys(YES), *lifted=FPLiftKeys([NSSet setWithArray:keys]);
+    FPPressKeys(keys); FPIWheel(y); FPReleaseModifiers(keys); FPRestoreKeys(lifted);
+    FPModifiersClicked(YES);
 }
 void FPTapKey(int scan,FPMods mods) {
-    if (!scan) return;
+    FPInputSetUp();
+    // A key a click holds (Alt view while Alt is down for Use) would be cut short mid-click.
+    if (!scan || [FPPressedKeys containsObject:@(scan)]) return;
+    NSMutableSet<NSNumber *> *keep=[NSMutableSet new];
+    for (int i=0;i<4;i++) if (mods&FPModScans[i][0]) [keep addObject:@(FPModScans[i][1])];
+    NSArray *lifted=FPLiftKeys(keep);
     // A modifier that is down already, say for a click in progress, stays down.
     BOOL pressed[4];
     for (int i=0;i<4;i++) if ((pressed[i]=(mods&FPModScans[i][0]) && !FPKeyDown(FPModScans[i][1]))) FPIKeyboard(FPModScans[i][1],1);
     FPIKeyboard(scan,1); FPIKeyboard(scan,0);
     for (int i=3;i>=0;i--) if (pressed[i]) FPIKeyboard(FPModScans[i][1],0);
+    FPRestoreKeys(lifted);
 }
 
 // One icon box per symbol size, so captions line up across a rail or panel whatever each icon's
@@ -131,8 +158,10 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self=[super initWithFrame:frame])) {
         [self addTarget:self action:@selector(down) forControlEvents:UIControlEventTouchDown];
-        [self addTarget:self action:@selector(up) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside];
-        [self addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchCancel];
+        [self addTarget:self action:@selector(up) forControlEvents:UIControlEventTouchUpInside];
+        // Sliding off cancels, as on iOS: no hold while off, no tap on lifting outside.
+        [self addTarget:self action:@selector(slidOff) forControlEvents:UIControlEventTouchDragExit];
+        [self addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchUpOutside|UIControlEventTouchCancel];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(releaseInput) name:UIApplicationWillResignActiveNotification object:nil];
     }
     return self;
@@ -188,6 +217,8 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
     if (self.onTap) self.onTap(self);
 }
 - (void)cancel { if (self.latch) [self stopHold]; else [self sendDown:NO]; }
+- (void)slidOff { [_holdTimer invalidate]; _holdTimer=nil; }
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event { return CGRectContainsPoint(CGRectInset(self.bounds,-self.hitSlop,-self.hitSlop),point); }
 - (void)didMoveToWindow { [super didMoveToWindow]; if (!self.window) [self sendDown:NO]; }
 - (void)setHidden:(BOOL)hidden { [super setHidden:hidden]; if (hidden) [self sendDown:NO]; }
 - (void)setHighlighted:(BOOL)highlighted { [super setHighlighted:NO]; }
@@ -249,15 +280,16 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
     b->_title=[UILabel new]; b->_title.text=title;
     b->_caption=[UILabel new]; b->_caption.text=caption;
     for (UILabel *label in @[b->_title,b->_caption]) {
-        label.textAlignment=NSTextAlignmentCenter; label.adjustsFontSizeToFitWidth=YES; label.minimumScaleFactor=0.6;
-        [b addSubview:label];
+        label.textAlignment=NSTextAlignmentCenter; [b addSubview:label];
     }
+    b->_title.adjustsFontSizeToFitWidth=YES; b->_title.minimumScaleFactor=0.6;   // captions keep one size
     b.layer.cornerRadius=12;
     b.isAccessibilityElement=YES; b.accessibilityTraits=UIAccessibilityTraitButton;
     b.accessibilityLabel=title; b.accessibilityHint=[caption stringByReplacingOccurrencesOfString:@" · " withString:@", "];
     [b addTarget:b action:@selector(fingerDown) forControlEvents:UIControlEventTouchDown];
-    [b addTarget:b action:@selector(fingerUp) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside];
-    [b addTarget:b action:@selector(fingerCancelled) forControlEvents:UIControlEventTouchCancel];
+    [b addTarget:b action:@selector(fingerUp) forControlEvents:UIControlEventTouchUpInside];
+    [b addTarget:b action:@selector(slidOff) forControlEvents:UIControlEventTouchDragExit];
+    [b addTarget:b action:@selector(fingerCancelled) forControlEvents:UIControlEventTouchUpOutside|UIControlEventTouchCancel];
     [b refreshAppearance];
     return b;
 }
@@ -268,7 +300,11 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
     }
     return self;
 }
-- (BOOL)active { return _modifierState!=FPModifierOff || _touching; }
+// A click takes every modifier that is on or under a finger; a wheel step takes only Alt, held or locked.
+- (BOOL)appliesToWheel:(BOOL)wheel {
+    if (!wheel) return _modifierState!=FPModifierOff || _touching;
+    return _scan==SDL_SCANCODE_LALT && (_touching || _modifierState==FPModifierHeld || _modifierState==FPModifierLocked);
+}
 - (void)changeTo:(FPModifierState)state haptic:(BOOL)haptic {
     if (state==_modifierState) return;
     _modifierState=state;
@@ -285,11 +321,13 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
     [self refreshAppearance];
 }
 - (void)hold { [_holdTimer invalidate]; _holdTimer=nil; _held=YES; [self changeTo:FPModifierHeld haptic:YES]; }
-// After each click or wheel step: a finger on it makes it held, and an armed one is spent.
-- (void)clicked {
+// After a click or wheel step it went round: a finger on it makes it held, and a click spends an armed one.
+- (void)clicked:(BOOL)wheel {
+    if (![self appliesToWheel:wheel]) return;
     if (_touching) [self hold];
-    else if (_modifierState==FPModifierArmed) [self changeTo:FPModifierOff haptic:YES];
+    else if (!wheel && _modifierState==FPModifierArmed) [self changeTo:FPModifierOff haptic:YES];
 }
+- (void)slidOff { if (!_held) { [_holdTimer invalidate]; _holdTimer=nil; } }
 - (void)endTouch { [_holdTimer invalidate]; _holdTimer=nil; _touching=_held=NO; [self refreshAppearance]; }
 // Held goes back to locked or off. A tap arms an off one, locks an armed one if quick, else turns it off.
 - (void)fingerUp {
@@ -317,18 +355,19 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
 - (void)refreshAppearance {
     FPModifierState s=_modifierState;
     BOOL filled=s==FPModifierHeld, locked=s==FPModifierLocked;
-    self.backgroundColor=filled ? FPAccent() : _touching ? FPLitSurface() : FPSurface();
+    self.backgroundColor=filled ? FPAccent() : _touching ? FPLitSurface() : locked ? [FPAccent() colorWithAlphaComponent:0.12] : FPSurface();
     self.layer.borderWidth=s==FPModifierOff || filled ? 1 : 1.5;
     self.layer.borderColor=(s==FPModifierOff ? FPStroke() : FPAccent()).CGColor;
     _title.textColor=filled ? FPInk() : locked ? FPAccent() : UIColor.whiteColor;
-    _caption.textColor=filled ? FPInk() : locked ? FPAccent() : [UIColor colorWithWhite:1 alpha:s==FPModifierArmed ? 1 : 0.6];
+    _caption.textColor=filled ? FPInk() : locked ? [UIColor colorWithRed:0.96 green:0.84 blue:0.6 alpha:1]
+                     : [UIColor colorWithWhite:1 alpha:s==FPModifierArmed ? 1 : 0.6];
     self.accessibilityValue=@[@"Off",@"On for the next click",@"Held",@"Locked"][s];
 }
 // Title above caption, centred as a pair, sized from the height so they scale with the layout.
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGSize s=self.bounds.size;
-    CGFloat titleSize=round(MAX(9,s.height*0.3)), captionSize=round(MAX(7,s.height*0.21));
+    CGFloat titleSize=round(s.height*0.24), captionSize=round(s.height*0.15);
     if (_title.font.pointSize!=titleSize) _title.font=[UIFont systemFontOfSize:titleSize weight:UIFontWeightSemibold];
     if (_caption.font.pointSize!=captionSize) _caption.font=[UIFont systemFontOfSize:captionSize weight:UIFontWeightMedium];
     CGFloat titleHeight=ceil(_title.font.lineHeight), captionHeight=_caption.text.length ? ceil(_caption.font.lineHeight) : 0;
@@ -385,7 +424,9 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
                      animations:^{ self.center=self->_restCenter; } completion:nil];
 }
 - (void)reset { [self settle:NO]; }
+// While a thumb holds it, touches beside it go to whatever is below.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    if (_touch) return NO;
     CGFloat r=self.bounds.size.width/2+18;
     return hypot(point.x-self.bounds.size.width/2,point.y-self.bounds.size.height/2)<=r;
 }

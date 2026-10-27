@@ -26,6 +26,11 @@ static void FPRequestPointerLock(UIViewController *controller,BOOL lock) {
 }
 
 static BOOL FPLeftButtonArrives;
+// Whether the iOS 27.1 workaround in adoptMouse is on: a trackpad's right button clicks left.
+static BOOL FPRightButtonClicks(BOOL phone) {
+    if (@available(iOS 27.2, *)) return NO;
+    return phone && !FPLeftButtonArrives;
+}
 
 // Factorio's HUD on the iPhone Duo's inner display, from the window's corners: the objective
 // panel at the top left and the quickbar at the bottom left. Landscape keeps clear of both
@@ -80,16 +85,18 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
 @property(nonatomic) CGSize previousLayoutSize;
 @end
 @implementation FPTouchOverlay
-// Controls take their own touches. Anywhere else is the game: the left thumb's area floats the
-// stick there, the deck swallows the rest of its own, and the pointer surface takes the game's.
+// Controls take their own touches. Anywhere else is the game: a finger in the left thumb's area
+// floats the stick there, the deck swallows the rest of its own, and the pointer surface takes
+// the game's. Anything but a finger (hover, a mouse or trackpad click, a probe with no event)
+// goes to SDL's own view: its pointer interaction is how SDL learns where a trackpad points.
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit=[super hitTest:point withEvent:event];
     if (!hit) return nil;
     if (hit!=self && hit!=self.deck && hit!=self.pointerSurface) { [self wake]; return hit; }
-    // Mouse and trackpad clicks go to SDL's own view, which reads them from GCMouse or the button mask.
-    if (event.buttonMask) return nil;
-    if (!self.joystick.hidden && CGRectContainsPoint(self.joystick.floatArea,point)) { [self wake]; return self.joystick; }
-    return hit==self.deck ? hit : self.pointerSurface;
+    BOOL finger=event && event.type==UIEventTypeTouches && !event.buttonMask;
+    if (finger && !self.joystick.hidden && CGRectContainsPoint(self.joystick.floatArea,point)) { [self wake]; return self.joystick; }
+    if (hit==self.deck) return hit;
+    return finger ? self.pointerSurface : nil;
 }
 // Pills take touches between their items, so a near miss doesn't click the game.
 - (UIView *)pill {
@@ -160,7 +167,7 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
 
         self.modeButtons=@[[self segment:@"Direct" symbol:@"hand.raised"],[self segment:@"Precise" symbol:@"cursorarrow"]];
         self.keyboardToggle=[self systemButton:@"keyboard" label:@"Keyboard" action:@selector(toggleKeyboard)];
-        self.typeToggle=[self systemButton:@"character.cursor.ibeam" label:@"Type with the iOS keyboard" action:@selector(toggleTextBar)];
+        self.typeToggle=[self systemButton:@"character.textbox" label:@"Type with the iOS keyboard" action:@selector(toggleTextBar)];
         self.toggle=[self systemButton:@"eye.slash" label:@"Hide controls" action:@selector(toggleControls)];
         [self buildMorePanel];
 
@@ -211,6 +218,7 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     FPInputButton *altView=[self item:@"Alt view" symbol:@"eye.square" tap:SDL_SCANCODE_LALT mods:0];
     altView.onTap=^(FPInputButton *b) { b.lit=!b.lit; };
     self.rightRail=@[undo,copy,cut,paste,flip,altView];
+    for (FPInputButton *b in [self.leftRail arrayByAddingObjectsFromArray:self.rightRail]) b.hitSlop=4;
 }
 // Use at the thumb's resting point, the rest on two arcs round it.
 - (void)buildCluster {
@@ -220,10 +228,9 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     mine.mouseButton=SDL_BUTTON_RIGHT; mine.accessibilityHint=@"Right click";
     FPInputButton *rotate=[self item:@"Rotate" symbol:@"arrow.clockwise" tap:SDL_SCANCODE_R mods:0];
     rotate.holdScan=SDL_SCANCODE_R; rotate.holdMods=FPModShift; rotate.accessibilityHint=@"Hold to rotate the other way";
-    // Clearing the cursor is Q too: the game clears a full hand and pipettes with an empty one.
+    // Q clears a full hand and pipettes with an empty one, so there's nothing left to hold for.
     FPInputButton *pipette=[self item:@"Pipette" symbol:@"eyedropper" tap:SDL_SCANCODE_Q mods:0];
-    pipette.holdScan=SDL_SCANCODE_Q; pipette.accessibilityHint=@"Hold to clear the cursor";
-    FPInputButton *pickUp=[self item:@"Pick up" symbol:@"hand.raised.fingers.spread"];
+    FPInputButton *pickUp=[self item:@"Pick up" symbol:@"hand.pinch"];
     pickUp.scan=SDL_SCANCODE_F;
     FPInputButton *shoot=[self item:@"Shoot" symbol:@"scope"];
     shoot.scan=SDL_SCANCODE_SPACE;
@@ -231,7 +238,11 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     FPInputButton *vehicle=[self item:@"Vehicle" symbol:@"car" tap:SDL_SCANCODE_RETURN mods:0];
     FPInputButton *drop=[self item:@"Drop" symbol:@"arrow.down.to.line" tap:SDL_SCANCODE_Z mods:0];
     self.cluster=@[use,mine,rotate,pipette,pickUp,shoot,weapon,vehicle,drop];
-    for (FPInputButton *b in self.cluster) { b.standalone=YES; [b refreshAppearance]; }
+    for (NSUInteger i=0;i<self.cluster.count;i++) {
+        FPInputButton *b=self.cluster[i];
+        b.standalone=YES; b.hitSlop=FPClusterShape[i][2]>40 ? 0 : FPClusterShape[i][2]>25 ? 2 : 4;
+        [b refreshAppearance];
+    }
 }
 // More: the other panels, two columns of captioned icons. Choosing one closes it, and so does
 // a touch anywhere else, through a clear scrim under the panel.
@@ -268,6 +279,8 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
 }
 - (void)closeMore {
     if (self.morePanel.hidden) return;
+    // A finger still on an item mustn't choose it once the panel has gone.
+    for (FPInputButton *b in self.moreItems) [b sendDown:NO];
     self.morePanel.hidden=self.moreScrim.hidden=YES; self.moreButton.lit=NO;
 }
 // SDL installs its GCMouse handlers first (its observers were registered earlier); chain ours after them.
@@ -289,7 +302,6 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     // only the right button arrives. Let the right button click instead until a real left-button event
     // shows the trackpad is fully available. iOS 27.2 delivers the tap, so keep the right button there.
     BOOL phone=UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPhone;
-    if (@available(iOS 27.2, *)) phone=NO;
     GCControllerButtonValueChangedHandler left=mouse.mouseInput.leftButton.pressedChangedHandler;
     mouse.mouseInput.leftButton.pressedChangedHandler=^(GCControllerButtonInput *input,float value,BOOL pressed) {
         FPLeftButtonArrives=YES;
@@ -298,7 +310,7 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     GCControllerButtonValueChangedHandler right=mouse.mouseInput.rightButton.pressedChangedHandler;
     __block BOOL clicking=NO;
     mouse.mouseInput.rightButton.pressedChangedHandler=^(GCControllerButtonInput *input,float value,BOOL pressed) {
-        if (pressed) clicking=phone && !FPLeftButtonArrives;
+        if (pressed) clicking=FPRightButtonClicks(phone);
         if (clicking) FPIMouseButton(SDL_BUTTON_LEFT,pressed);
         else if (right) right(input,value,pressed);
     };
@@ -345,7 +357,7 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
         [self toggleControls]; self.autoHidden=YES;
         NSString *device=controller ? @"Controller" : mice.count ? @"Trackpad" : @"Keyboard";
         BOOL phone=self.traitCollection.userInterfaceIdiom==UIUserInterfaceIdiomPhone;
-        NSString *detail=mice.count && phone ? @"\nTrackpad: right button clicks. Needs AssistiveTouch for a pointer." : @"\nTap the eye to bring them back.";
+        NSString *detail=mice.count && FPRightButtonClicks(phone) ? @"\nTrackpad: right button clicks. Needs AssistiveTouch for a pointer." : @"\nTap the eye to bring them back.";
         [self showHint:[[device stringByAppendingString:@" connected: touch controls hidden."] stringByAppendingString:detail]];
     } else if (!hardware && self.hadHardware && self.autoHidden && !self.expanded) {
         [self toggleControls];
@@ -400,8 +412,8 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     }
 }
 - (void)selectMode:(UIButton *)sender { [self setMode:(FPTouchMode)[self.modeButtons indexOfObject:sender]]; }
+// The surface ends its own gesture on a change; buttons and a walking stick carry on.
 - (void)setMode:(FPTouchMode)mode {
-    [self releaseInputs];
     _mode=mode;
     [self applyVisibility];
     [self refreshModeButtons];
@@ -554,7 +566,8 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
 - (void)styleItem:(FPInputButton *)b {
     CGFloat s=self.scale;
     b.layer.cornerRadius=round(10*s);
-    b.titleLabel.font=[UIFont systemFontOfSize:9*s weight:UIFontWeightMedium];
+    b.titleLabel.font=[UIFont systemFontOfSize:7.5 weight:UIFontWeightMedium];
+    b.titleLabel.adjustsFontSizeToFitWidth=NO;
     FPSymbolSize(b,13*s);
 }
 // Captioned items along a rail, each in a slot inset from the rail's edge so its pressed and lit
@@ -569,9 +582,10 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
         [self styleItem:items[i]];
     }
 }
-- (CGSize)morePanelSize { CGFloat s=self.scale; return CGSizeMake(2*round(66*s)+3*round(4*s),3*round(50*s)+4*round(4*s)); }
+// Cells never narrower than "Factoriopedia" at the captions' one size.
+- (CGSize)morePanelSize { CGFloat s=self.scale; return CGSizeMake(2*round(MAX(66*s,58))+3*round(4*s),3*round(50*s)+4*round(4*s)); }
 - (void)layoutMorePanelAt:(CGPoint)origin {
-    CGFloat s=self.scale, width=round(66*s), height=round(50*s), pad=round(4*s);
+    CGFloat s=self.scale, width=round(MAX(66*s,58)), height=round(50*s), pad=round(4*s);
     CGSize size=self.morePanelSize;
     self.morePanel.frame=CGRectMake(round(origin.x),round(origin.y),size.width,size.height);
     self.morePanel.layer.cornerRadius=round(16*s);
@@ -592,13 +606,17 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     }
 }
 // The stick rests at c; the modifiers sit round its upper right unless the deck puts them on a row.
+// They keep room for their captions, with Ctrl moved along to clear a wider Shift.
 - (void)layoutStickAt:(CGPoint)c modifiers:(BOOL)beside {
-    CGFloat s=self.scale, size=2*floor(FPStickSize*s/2);
+    CGFloat s=self.scale, size=2*floor(FPStickSize*s/2), width=MAX(FPModifierWidth*s,44);
     c=CGPointMake(round(c.x),round(c.y));
     self.joystick.bounds=CGRectMake(0,0,size,size);
     self.joystick.restCenter=c;
-    if (beside) for (NSUInteger i=0;i<self.modifiers.count;i++)
-        self.modifiers[i].frame=FPRect(c.x+FPModifierShape[i][0]*s,c.y+FPModifierShape[i][1]*s,MAX(FPModifierWidth*s,42),FPModifierHeight*s);
+    if (beside) for (NSUInteger i=0;i<self.modifiers.count;i++) {
+        CGFloat x=FPModifierShape[i][0]*s;
+        if (i==1) x=MAX(x,FPModifierShape[0][0]*s+width+6*s);
+        self.modifiers[i].frame=FPRect(c.x+x,c.y+FPModifierShape[i][1]*s,width,FPModifierHeight*s);
+    }
 }
 - (void)layoutKeyboardIn:(CGRect)frame {
     self.keyboard.frame=frame;
@@ -640,8 +658,8 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     [self.pointerSurface refreshCursor];
 }
 // Landscape, as the mockup: the left thumb walks and holds modifiers, the right thumb acts, and
-// panels sit on the edges. Places are the mockup's, scaled, from the safe area's corners. Where
-// the window is tall enough, the objective panel and the quickbar stay clear.
+// panels sit on the edges. Places are the mockup's, scaled, from the safe area's corners. The
+// objective panel and the quickbar stay clear unless the window is too short for any layout.
 - (void)layoutFloatingIn:(CGRect)area {
     self.gameReserve=0;
     CGSize size=self.bounds.size;
@@ -651,24 +669,34 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
     // Right thumb: Use by the corner, the cluster round it, the build tools on a rail above.
     CGPoint use=CGPointMake(CGRectGetMaxX(area)-60*s,CGRectGetMaxY(area)-63*s);
     [self layoutClusterAt:use];
-    [self layoutRail:self.rightRail pill:self.rightPill frame:FPRect(CGRectGetMaxX(area)-46*s,MAX(CGRectGetMinY(area),use.y-436*s),46*s,249*s) vertical:YES];
-    // Left thumb: the stick above the quickbar, the panels rail above the stick, the modifiers to its upper right.
-    CGFloat stickY=MIN(MAX(CGRectGetMinY(quickbar)-107*s,CGRectGetMinY(area)+320.5*s),CGRectGetMaxY(area)-78.5*s);
-    [self layoutStickAt:CGPointMake(CGRectGetMinX(area)+96*s,stickY) modifiers:YES];
-    [self layoutRail:self.leftRail pill:self.leftPill frame:FPRect(CGRectGetMinX(area)+2*s,MAX(CGRectGetMinY(area),stickY-362*s),50*s,230*s) vertical:YES];
-    CGFloat floatTop=CGRectGetMaxY(self.leftPill.frame), floatBottom=MAX(CGRectGetMinY(quickbar),stickY+78.5*s);
-    self.joystick.floatArea=CGRectMake(0,floatTop,round(size.width/3),round(floatBottom-floatTop));
+    // Never so narrow that a caption is cut or a hold dot reaches its icon.
+    CGFloat railWidth=MAX(46*s,44);
+    [self layoutRail:self.rightRail pill:self.rightPill frame:FPRect(CGRectGetMaxX(area)-railWidth,MAX(CGRectGetMinY(area),use.y-436*s),railWidth,249*s) vertical:YES];
+    // Left thumb, between the objective panel and the quickbar: the stick with the modifiers to its
+    // upper right, and the panels rail above it, or beside it where the window is too short.
+    CGFloat top=MAX(CGRectGetMinY(area),CGRectGetMaxY(objective)+8*s), bottom=MIN(CGRectGetMaxY(area),CGRectGetMinY(quickbar));
+    if (bottom-top<238*s) { top=CGRectGetMinY(area); bottom=CGRectGetMaxY(area); }
+    BOOL above=bottom-top>=399*s;
+    CGFloat stickY=above ? MIN(MAX(CGRectGetMinY(quickbar)-107*s,top+320.5*s),bottom-78.5*s) : bottom-78.5*s;
+    CGFloat leftWidth=MAX(50*s,48), stickX=above ? 96*s : 12*s+leftWidth+78.5*s;
+    [self layoutStickAt:CGPointMake(CGRectGetMinX(area)+stickX,stickY) modifiers:YES];
+    [self layoutRail:self.leftRail pill:self.leftPill frame:FPRect(CGRectGetMinX(area)+2*s,MAX(top,above ? stickY-362*s : bottom-238*s),leftWidth,230*s) vertical:YES];
+    CGRect rail=self.leftPill.frame;
+    CGFloat floatLeft=above ? 0 : CGRectGetMaxX(rail), floatTop=above ? CGRectGetMaxY(rail) : top;
+    CGFloat floatBottom=MAX(CGRectGetMinY(quickbar),stickY+78.5*s);
+    self.joystick.floatArea=CGRectMake(floatLeft,floatTop,round(size.width/3)-floatLeft,round(floatBottom-floatTop));
     // Right of centre, clear of the objective panel and the build tools.
     CGFloat pillWidth=self.pillWidth;
     CGFloat centerX=MAX(CGRectGetMinX(area)+width*0.62,CGRectGetMaxX(objective)+8*s+pillWidth/2);
     centerX=MIN(centerX,CGRectGetMinX(self.rightPill.frame)-8*s-pillWidth/2);
     centerX=MIN(MAX(centerX,CGRectGetMinX(area)+pillWidth/2),CGRectGetMaxX(area)-pillWidth/2);
     CGRect pill=[self layoutPillAt:CGPointMake(round(centerX-pillWidth/2),CGRectGetMinY(area))];
-    // More opens beside the rail, above the modifiers.
-    CGFloat moreBottom=MIN(CGRectGetMaxY(self.leftPill.frame),CGRectGetMinY(self.modifiers[0].frame)-8*s);
-    [self layoutMorePanelAt:CGPointMake(CGRectGetMaxX(self.leftPill.frame)+8*s,MAX(CGRectGetMinY(area),moreBottom-self.morePanelSize.height))];
+    // More opens beside the rail: above the modifiers, or over the stick when it sits beside the rail.
+    CGFloat moreBottom=above ? MIN(CGRectGetMaxY(rail),CGRectGetMinY(self.modifiers[0].frame)-8*s) : CGRectGetMaxY(rail);
+    [self layoutMorePanelAt:CGPointMake(CGRectGetMaxX(rail)+8*s,MAX(CGRectGetMinY(area),moreBottom-self.morePanelSize.height))];
 
-    CGFloat top=CGRectGetMaxY(pill)+round(10*s);
+    // The hint, the keyboard and the text bar open below the pill and the objective panel.
+    top=MAX(CGRectGetMaxY(pill)+round(10*s),round(CGRectGetMaxY(objective)+8*s));
     CGFloat hintWidth=MIN(400,width);
     self.modeHint.frame=CGRectMake(MIN(MAX(round(centerX-hintWidth/2),CGRectGetMinX(area)),CGRectGetMaxX(area)-hintWidth),top,hintWidth,round(46*s));
     CGFloat keyboardWidth=MIN(900,width);
@@ -695,10 +723,13 @@ static void FPSymbolSize(UIButton *b,CGFloat size) {
         for (NSUInteger i=0;i<self.modifiers.count;i++)
             self.modifiers[i].frame=CGRectMake(CGRectGetMinX(area)+i*(modifierWidth+gap),y,modifierWidth,round(FPModifierHeight*s));
     }
+    // Rails that need a row each get wider slots, which keeps the hold dots off their icons.
     CGFloat left=self.leftRail.count*slot, right=self.rightRail.count*slot;
+    BOOL oneRow=left+gap+right<=width;
+    if (!oneRow) { slot=MIN(floor(width/self.rightRail.count),64); left=self.leftRail.count*slot; right=self.rightRail.count*slot; }
     y-=gap+row;
     [self layoutRail:self.rightRail pill:self.rightPill frame:CGRectMake(CGRectGetMaxX(area)-right,y,right,row) vertical:NO];
-    if (left+gap+right>width) y-=gap+row;
+    if (!oneRow) y-=gap+row;
     [self layoutRail:self.leftRail pill:self.leftPill frame:CGRectMake(CGRectGetMinX(area),y,left,row) vertical:NO];
     y-=gap+round(38*s);
     CGRect pill=[self layoutPillAt:CGPointMake(round(CGRectGetMidX(area)-self.pillWidth/2),y)];

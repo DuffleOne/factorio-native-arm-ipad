@@ -67,6 +67,20 @@ SDL_Window *SDL_GetKeyboardFocus(void) { return NULL; }
 - (UITouchType)type { return UITouchTypeDirect; }
 @end
 
+// An event of a given type and button mask, for hitTest.
+@interface FakeEvent : UIEvent
+@property(nonatomic) UIEventType fakeType;
+@property(nonatomic) UIEventButtonMask fakeMask;
+@end
+@implementation FakeEvent
+- (UIEventType)type { return self.fakeType; }
+- (UIEventButtonMask)buttonMask { return self.fakeMask; }
+@end
+static FakeEvent *eventOf(UIEventType type,UIEventButtonMask mask) {
+    FakeEvent *event=[FakeEvent new]; event.fakeType=type; event.fakeMask=mask; return event;
+}
+static UIEvent *finger;
+
 static NSMutableArray<NSString *> *failures;
 static void check(BOOL value,NSString *message) {
     if (!value) [failures addObject:message];
@@ -75,6 +89,12 @@ static void spin(NSTimeInterval seconds) { [NSRunLoop.currentRunLoop runUntilDat
 static void tap(UIControl *control) {
     [control sendActionsForControlEvents:UIControlEventTouchDown];
     [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+}
+// Down, then the finger slides off and lifts outside.
+static void slideOff(UIControl *control) {
+    [control sendActionsForControlEvents:UIControlEventTouchDown];
+    [control sendActionsForControlEvents:UIControlEventTouchDragExit];
+    [control sendActionsForControlEvents:UIControlEventTouchUpOutside];
 }
 static void hold(UIControl *control) {
     [control sendActionsForControlEvents:UIControlEventTouchDown];
@@ -145,7 +165,12 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
         check(inside(b.frame,overlay.systemPill.frame),[NSString stringWithFormat:@"%@: %@ outside the top pill",name,b.accessibilityLabel]);
     for (FPInputButton *b in overlay.moreItems) check(inside(b.frame,overlay.morePanel.bounds),[NSString stringWithFormat:@"%@: %@ outside the More panel",name,b.accessibilityLabel]);
     check(inside(overlay.morePanel.frame,area),[name stringByAppendingString:@": More panel outside the safe area"]);
-    // Factorio's objective panel and quickbar stay clear on the Duo's inner display and larger.
+    // Factorio's objective panel and quickbar stay clear: of everything on the Duo's inner display
+    // and larger, and of the left rail and the stick on smaller windows.
+    if (size.width>size.height) {
+        check(!CGRectIntersectsRect(overlay.leftPill.frame,FPObjectiveArea(size)),[name stringByAppendingString:@": left rail covers the objective panel"]);
+        check(!CGRectIntersectsRect(overlay.joystick.frame,FPQuickbarArea(size)),[name stringByAppendingString:@": stick covers the quickbar"]);
+    }
     if (size.width>size.height && size.height>=600) for (NSString *label in labels) {
         CGRect frame=groups[label].frame;
         check(!CGRectIntersectsRect(frame,FPObjectiveArea(size)) && !CGRectIntersectsRect(frame,FPQuickbarArea(size)),
@@ -160,13 +185,14 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
         check(inside(k.frame,overlay.keyboard.bounds),[name stringByAppendingString:@": key outside the keyboard"]);
     // Routing: the float area floats the stick, the game goes to the surface, gaps in a rail stay in it.
     CGRect float_=overlay.joystick.floatArea;
-    check([overlay hitTest:CGPointMake(CGRectGetMinX(float_)+3,CGRectGetMaxY(float_)-3) withEvent:nil]==overlay.joystick,
+    check([overlay hitTest:CGPointMake(CGRectGetMinX(float_)+3,CGRectGetMaxY(float_)-3) withEvent:finger]==overlay.joystick,
           [name stringByAppendingString:@": float area routes to the stick"]);
     CGPoint game=overlay.split ? CGPointMake(CGRectGetMidX(area),CGRectGetMinY(overlay.deck.frame)/2) : CGPointMake(CGRectGetMidX(area),CGRectGetMidY(area));
-    check([overlay hitTest:game withEvent:nil]==overlay.pointerSurface,[name stringByAppendingString:@": the game routes to the pointer surface"]);
+    check([overlay hitTest:game withEvent:finger]==overlay.pointerSurface,[name stringByAppendingString:@": the game routes to the pointer surface"]);
     CGRect rail=overlay.leftPill.frame;
     CGPoint gapPoint=overlay.split ? CGPointMake(CGRectGetMaxX(rail)-1,CGRectGetMidY(rail)) : CGPointMake(CGRectGetMidX(rail),CGRectGetMaxY(rail)-1);
-    check([overlay hitTest:gapPoint withEvent:nil]==overlay.leftPill,[name stringByAppendingString:@": a rail keeps touches between its items"]);
+    UIView *gapHit=[overlay hitTest:gapPoint withEvent:finger];
+    check(gapHit==overlay.leftPill || [overlay.leftRail containsObject:(FPInputButton *)gapHit],[name stringByAppendingString:@": a rail keeps touches between its items"]);
     BOOL portrait=size.height>size.width;
     check(overlay.split==portrait && overlay.deck.hidden==!portrait,[name stringByAppendingString:@": split deck only in portrait"]);
     check(portrait ? reservedBottom>0 && size.height-reservedBottom<=CGRectGetMinY(overlay.deck.frame)-4 : reservedBottom==0,
@@ -178,7 +204,7 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
         for (CGFloat x=size.width/3+2;x<size.width && !deckHit;x+=2) {
             CGPoint p=CGPointMake(x,size.height-2); BOOL free=YES;
             for (UIView *v in groups.allValues) free=free && !CGRectContainsPoint(v.frame,p);
-            if (free) deckHit=[overlay hitTest:p withEvent:nil];
+            if (free) deckHit=[overlay hitTest:p withEvent:finger];
         }
         check(deckHit==overlay.deck,[name stringByAppendingString:@": the deck keeps its own touches"]);
     }
@@ -203,7 +229,7 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
     [overlay setNeedsLayout]; [overlay layoutIfNeeded];
 }
 - (void)runChecks {
-    failures=[NSMutableArray new]; events=[NSMutableArray new];
+    failures=[NSMutableArray new]; events=[NSMutableArray new]; finger=eventOf(UIEventTypeTouches,0);
     NSString *output=[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
     NSMutableArray *cases=[@[
         @[@"duo-mockup",@951,@669,@0,@0,@0,@0],
@@ -227,6 +253,11 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
         check([b imageForState:UIControlStateNormal]!=nil,[b.accessibilityLabel stringByAppendingString:@": no symbol"]);
     for (UIButton *b in overlay.modeButtons) check(b.configuration.image!=nil,[b.accessibilityLabel stringByAppendingString:@": no symbol"]);
 
+    // The states the mockup shows: Ctrl locked, Alt view lit.
+    FPModifierButton *shift=overlay.modifiers[0], *ctrl=overlay.modifiers[1], *alt=overlay.modifiers[2];
+    FPInputButton *altView=named(overlay,@"Alt view");
+    tap(ctrl); tap(ctrl); altView.lit=YES;
+    check(ctrl.modifierState==FPModifierLocked,@"a double-tap locks a modifier");
     for (NSArray *item in cases) {
         [self layout:overlay width:[item[1] doubleValue] height:[item[2] doubleValue]
               insets:UIEdgeInsetsMake([item[3] doubleValue],[item[4] doubleValue],[item[5] doubleValue],[item[6] doubleValue])];
@@ -234,8 +265,20 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
         snapshot(overlay,output,item[0]);
     }
 
+    tap(ctrl); altView.lit=NO;
+    check(ctrl.modifierState==FPModifierOff,@"a tap unlocks a locked modifier");
+
     // The mockup's own window, from here on.
     [self layout:overlay width:951 height:669 insets:UIEdgeInsetsZero];
+    // Only a finger reaches the game's surface or floats the stick; anything else goes to SDL's view.
+    CGPoint game=CGPointMake(475,334), floating=CGPointMake(30,560);
+    check([overlay hitTest:game withEvent:finger]==overlay.pointerSurface && [overlay hitTest:floating withEvent:finger]==overlay.joystick,@"a finger reaches the game and the stick");
+    for (UIEvent *event in @[eventOf(UIEventTypeHover,0),eventOf(UIEventTypeTouches,UIEventButtonMaskPrimary)])
+        check(![overlay hitTest:game withEvent:event] && ![overlay hitTest:floating withEvent:event],
+              [NSString stringWithFormat:@"event type %ld mask %ld goes to SDL's view",(long)event.type,(long)event.buttonMask]);
+    check(![overlay hitTest:game withEvent:nil],@"a hit test with no event goes to SDL's view");
+    check([overlay hitTest:CGPointMake(CGRectGetMidX(named(overlay,@"Use").frame),CGRectGetMidY(named(overlay,@"Use").frame)) withEvent:nil]==named(overlay,@"Use"),
+          @"controls take hit tests with no event");
     check(overlay.mode==FPTouchDirect && overlay.pointerSurface.mode==FPTouchDirect,@"Direct is the default");
     [overlay selectMode:overlay.modeButtons[1]];
     check(overlay.pointerSurface.mode==FPTouchPrecise && overlay.pointerSurface.userInteractionEnabled && !overlay.pointerSurface.hidden,@"Precise button selects Precise");
@@ -248,21 +291,29 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
     check(!overlay.morePanel.hidden && more.lit,@"More opens its panel and lights up");
     for (NSString *label in @[@"left rail",@"top pill",@"stick",@"Shift",@"Ctrl",@"Alt"])
         check(!overlaps(overlay.morePanel,groupsOf(overlay)[label]),[@"More panel covers the " stringByAppendingString:label]);
-    check([overlay hitTest:CGPointMake(475,334) withEvent:nil]==overlay.moreScrim,@"More panel takes a touch on the game to close");
+    check([overlay hitTest:CGPointMake(475,334) withEvent:finger]==overlay.moreScrim,@"More panel takes a touch on the game to close");
     [overlay wake]; snapshot(overlay,output,@"duo-mockup-more");
     [events removeAllObjects];
     tap(named(overlay,@"Production"));
     check(sentExactly(@[key(SDL_SCANCODE_P,YES),key(SDL_SCANCODE_P,NO)]),describe(@"Production sends P"));
     check(overlay.morePanel.hidden && !more.lit,@"a choice closes the More panel");
-    tap(more); [overlay.moreScrim sendActionsForControlEvents:UIControlEventTouchDown];
+    tap(more); [events removeAllObjects];
+    FPInputButton *production=named(overlay,@"Production");
+    [production sendActionsForControlEvents:UIControlEventTouchDown];
+    [overlay.moreScrim sendActionsForControlEvents:UIControlEventTouchDown];
     check(overlay.morePanel.hidden && !more.lit,@"a touch elsewhere closes the More panel");
+    [production sendActionsForControlEvents:UIControlEventTouchUpInside];
+    check(!events.count,describe(@"an item still pressed when More closes sends nothing"));
     tap(more); tap(named(overlay,@"Chat"));
     tap(more); [events removeAllObjects];
     tap(named(overlay,@"Factoriopedia"));
-    FPModifierButton *shift=overlay.modifiers[0], *ctrl=overlay.modifiers[1], *alt=overlay.modifiers[2];
     check(overlay.morePanel.hidden && alt.modifierState==FPModifierArmed && !events.count,@"Factoriopedia arms Alt and sends nothing");
 
-    // Modifiers press their key around clicks only. Tap: the next click. Hold: clicks while held. Double-tap: locked.
+    // Modifiers press their key round clicks only. Tap: the next click. Hold: clicks while held.
+    // Double-tap: locked. Only a held or locked Alt goes round wheel steps, which spend nothing.
+    FPWheel(1);
+    check(sentExactly(@[@"w1"]) && alt.modifierState==FPModifierArmed,describe(@"a wheel step leaves an armed Alt alone"));
+    [events removeAllObjects];
     FPClick(SDL_BUTTON_LEFT,YES); FPClick(SDL_BUTTON_LEFT,NO);
     check(sentExactly(@[key(SDL_SCANCODE_LALT,YES),@"+m1",@"-m1",key(SDL_SCANCODE_LALT,NO)]) && alt.modifierState==FPModifierOff,
           describe(@"armed Alt goes round the next click, which spends it"));
@@ -276,13 +327,23 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
     FPClick(SDL_BUTTON_LEFT,YES); FPClick(SDL_BUTTON_LEFT,NO);
     check(sentExactly(@[@"+m1",@"-m1"]),describe(@"a spent modifier leaves the next click alone"));
     tap(ctrl); tap(ctrl);
-    check(ctrl.modifierState==FPModifierLocked,@"a double-tap locks a modifier");
     [events removeAllObjects];
     FPClick(SDL_BUTTON_LEFT,YES); FPClick(SDL_BUTTON_LEFT,NO); FPWheel(1);
-    check(sentExactly(@[key(SDL_SCANCODE_LCTRL,YES),@"+m1",@"-m1",key(SDL_SCANCODE_LCTRL,NO),key(SDL_SCANCODE_LCTRL,YES),@"w1",key(SDL_SCANCODE_LCTRL,NO)]) &&
-          ctrl.modifierState==FPModifierLocked,describe(@"locked Ctrl goes round every click and wheel step"));
+    check(sentExactly(@[key(SDL_SCANCODE_LCTRL,YES),@"+m1",@"-m1",key(SDL_SCANCODE_LCTRL,NO),@"w1"]) &&
+          ctrl.modifierState==FPModifierLocked,describe(@"locked Ctrl goes round every click but not wheel steps"));
     tap(ctrl);
-    check(ctrl.modifierState==FPModifierOff,@"a tap unlocks a locked modifier");
+    tap(alt); tap(alt);
+    [events removeAllObjects]; FPWheel(-1);
+    check(sentExactly(@[key(SDL_SCANCODE_LALT,YES),@"w-1",key(SDL_SCANCODE_LALT,NO)]) && alt.modifierState==FPModifierLocked,
+          describe(@"locked Alt goes round wheel steps"));
+    tap(alt);
+    [alt sendActionsForControlEvents:UIControlEventTouchDown];
+    [events removeAllObjects]; FPWheel(1);
+    [alt sendActionsForControlEvents:UIControlEventTouchUpInside];
+    check(sentExactly(@[key(SDL_SCANCODE_LALT,YES),@"w1",key(SDL_SCANCODE_LALT,NO)]) && alt.modifierState==FPModifierOff,
+          describe(@"held Alt goes round wheel steps"));
+    slideOff(shift);
+    check(shift.modifierState==FPModifierOff,@"sliding off a modifier cancels it");
     [shift sendActionsForControlEvents:UIControlEventTouchDown];
     [events removeAllObjects];
     FPClick(SDL_BUTTON_LEFT,YES); FPClick(SDL_BUTTON_LEFT,NO);
@@ -293,7 +354,7 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
     // Tap and hold actions, and Alt view's light.
     NSArray *checks=@[@[@"Rotate",@NO,@[key(SDL_SCANCODE_R,YES),key(SDL_SCANCODE_R,NO)]],
                       @[@"Rotate",@YES,@[key(SDL_SCANCODE_LSHIFT,YES),key(SDL_SCANCODE_R,YES),key(SDL_SCANCODE_R,NO),key(SDL_SCANCODE_LSHIFT,NO)]],
-                      @[@"Pipette",@YES,@[key(SDL_SCANCODE_Q,YES),key(SDL_SCANCODE_Q,NO)]],
+                      @[@"Pipette",@NO,@[key(SDL_SCANCODE_Q,YES),key(SDL_SCANCODE_Q,NO)]],
                       @[@"Undo",@NO,@[key(SDL_SCANCODE_LGUI,YES),key(SDL_SCANCODE_Z,YES),key(SDL_SCANCODE_Z,NO),key(SDL_SCANCODE_LGUI,NO)]],
                       @[@"Undo",@YES,@[key(SDL_SCANCODE_LSHIFT,YES),key(SDL_SCANCODE_LGUI,YES),key(SDL_SCANCODE_Z,YES),key(SDL_SCANCODE_Z,NO),key(SDL_SCANCODE_LGUI,NO),key(SDL_SCANCODE_LSHIFT,NO)]],
                       @[@"Paste",@NO,@[key(SDL_SCANCODE_LGUI,YES),key(SDL_SCANCODE_V,YES),key(SDL_SCANCODE_V,NO),key(SDL_SCANCODE_LGUI,NO)]],
@@ -306,11 +367,26 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
         if ([c[1] boolValue]) hold(named(overlay,c[0])); else tap(named(overlay,c[0]));
         check(sentExactly(c[2]),describe([NSString stringWithFormat:@"%@ %@",[c[1] boolValue] ? @"hold" : @"tap",c[0]]));
     }
-    FPInputButton *altView=named(overlay,@"Alt view");
+    check(!named(overlay,@"Pipette").holdScan,@"Pipette has no hold action");
+    [events removeAllObjects]; slideOff(named(overlay,@"Menu"));
+    check(!events.count,describe(@"sliding off a button cancels its tap"));
     [events removeAllObjects]; tap(altView);
     check(altView.lit && sentExactly(@[key(SDL_SCANCODE_LALT,YES),key(SDL_SCANCODE_LALT,NO)]),describe(@"Alt view taps Alt and lights up"));
     tap(altView);
     check(!altView.lit,@"Alt view's second tap puts its light out");
+
+    // A mode change leaves a walking stick alone.
+    FakeTouch *walk=[FakeTouch new]; walk.reference=overlay; walk.fakePhase=UITouchPhaseBegan;
+    walk.point=CGPointMake(100,480);
+    [overlay.joystick touchesBegan:[NSSet setWithObject:walk] withEvent:nil];
+    walk.point=CGPointMake(160,480); walk.fakePhase=UITouchPhaseMoved;
+    [overlay.joystick touchesMoved:[NSSet setWithObject:walk] withEvent:nil];
+    [overlay selectMode:overlay.modeButtons[1]];
+    check(keys[SDL_SCANCODE_D] && overlay.joystick.direction==0,@"a mode change keeps the stick walking");
+    walk.fakePhase=UITouchPhaseEnded;
+    [overlay.joystick touchesEnded:[NSSet setWithObject:walk] withEvent:nil];
+    check(!keys[SDL_SCANCODE_D],@"lifting the thumb stops walking");
+    [overlay selectMode:overlay.modeButtons[0]];
 
     // Resizing releases everything held, the floating stick included.
     [named(overlay,@"Pick up") sendDown:YES];
@@ -348,7 +424,7 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
     for (UIView *v in overlay.buttons) check(v.hidden,@"hiding hides the action controls");
     check(overlay.pointerSurface.mode==FPTouchDirect && !overlay.pointerSurface.hidden && overlay.pointerSurface.userInteractionEnabled,
           @"hidden controls leave the surface taking Direct touches");
-    check([overlay hitTest:CGPointMake(60,500) withEvent:nil]==overlay.pointerSurface,@"hidden controls don't float the stick");
+    check([overlay hitTest:CGPointMake(60,500) withEvent:finger]==overlay.pointerSurface,@"hidden controls don't float the stick");
     [overlay toggleControls]; [overlay layoutIfNeeded];
     check(!overlay.joystick.hidden && !overlay.modeButtons[1].hidden && overlay.pointerSurface.mode==FPTouchPrecise,@"showing restores the controls and Precise");
     [overlay selectMode:overlay.modeButtons[0]];
@@ -379,11 +455,11 @@ static void checkLayout(LayoutOverlay *overlay,NSString *name) {
     [overlay selectMode:overlay.modeButtons[1]];
     CGPoint expected=CGPointMake(CGRectGetMinX(gameFrame)+0.75*gameFrame.size.width,CGRectGetMinY(gameFrame)+0.25*gameFrame.size.height);
     pointerX=pointerY=0;
-    FakeTouch *finger=[FakeTouch new]; finger.reference=overlay; finger.point=expected; finger.fakePhase=UITouchPhaseBegan;
-    [overlay.pointerSurface touchesBegan:[NSSet setWithObject:finger] withEvent:nil];
+    FakeTouch *aim=[FakeTouch new]; aim.reference=overlay; aim.point=expected; aim.fakePhase=UITouchPhaseBegan;
+    [overlay.pointerSurface touchesBegan:[NSSet setWithObject:aim] withEvent:nil];
     check(fabs(pointerX-0.75)<0.005 && fabs(pointerY-0.25)<0.005,@"a Precise touch maps into the inset game viewport");
-    finger.fakePhase=UITouchPhaseEnded;
-    [overlay.pointerSurface touchesEnded:[NSSet setWithObject:finger] withEvent:nil];
+    aim.fakePhase=UITouchPhaseEnded;
+    [overlay.pointerSurface touchesEnded:[NSSet setWithObject:aim] withEvent:nil];
     [overlay selectMode:overlay.modeButtons[0]];
 
     NSDictionary *result=@{@"layout_cases":@(cases.count),@"failures":failures,
