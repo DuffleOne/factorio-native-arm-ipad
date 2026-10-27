@@ -72,6 +72,7 @@ void FPTapKey(int scan,FPMods mods);
 @property(nonatomic,copy) void (^onTap)(FPInputButton *button);   // after a tap's input, if any
 @property(nonatomic) BOOL lit;              // drawn in the accent while on, e.g. Alt view
 @property(nonatomic) BOOL primary;          // always filled with the accent, for Use
+@property(nonatomic) CGFloat hitSlop;       // touches this far outside the frame still count
 // Keys on the full keyboard.
 @property(nonatomic) BOOL latch;            // Shift, Ctrl, Alt, Cmd: one tap on, the next off
 @property(nonatomic) BOOL withCommand;      // Copy and Paste add Cmd
