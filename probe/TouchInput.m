@@ -263,7 +263,8 @@ static CGFloat FPIconBox(UIImageSymbolConfiguration *symbol) {
     CGFloat box=image.isSymbolImage ? FPIconBox(symbol) : icon.height;
     CGFloat captionHeight=ceil(self.titleLabel.font.lineHeight), top=floor((size.height-box-captionHeight)/2);
     self.imageView.frame=CGRectMake(floor((size.width-icon.width)/2),top+floor((box-icon.height)/2),icon.width,icon.height);
-    self.titleLabel.frame=CGRectMake(3,top+box,size.width-6,captionHeight);
+    self.titleLabel.frame=CGRectMake(1,top+box,size.width-2,captionHeight);
+    self.titleLabel.allowsDefaultTighteningForTruncation=YES;
 }
 @end
 
