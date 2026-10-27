@@ -110,16 +110,40 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
         assert struct.unpack_from('<I',data,at)[0] == 0xaa1403e0
         struct.pack_into('<I',data,at,0x14000000|(((-152)>>2)&0x3ffffff))
         platform_patches.append(dict(name='skip macOS display-ID log suffix',offset=at,original_bytes='e00314aa'))
-        # The Mac build's curl takes the first system CA bundle that exists.
-        # On iOS /etc/ssl/cert.pem exists but the sandbox won't let the app
-        # read it, so factorio.com logins fail. Branch straight to the
-        # fallback, which uses the cacert.pem shipped in the game data.
+        # factorio.com logins: the Mac build's curl names /etc/ssl/cert.pem as
+        # its default CA file, which the iOS sandbox won't let the app read,
+        # and its Secure Transport backend then fails rather than use the
+        # system's trusted roots. Clear that default, as in a curl built
+        # without one, so iOS verifies the server itself.
+        def string_at(at):
+            adrp, add = struct.unpack_from('<II',data,at)
+            page = ((base+at)&~0xfff)+((((adrp>>5)&0x7ffff)<<2|(adrp>>29)&3)<<12)
+            return page+((add>>10)&0xfff)-base
+        def call_target(at):
+            offset = struct.unpack_from('<I',data,at)[0]&0x3ffffff
+            return base+at+4*(offset-(1<<26) if offset&(1<<25) else offset)
+        init = next(s for s in m.symbols() if s['name']=='_Curl_init_userdefined')
+        setstropt = next(s for s in m.symbols() if s['name']=='_Curl_setstropt')['address']
+        cert = b'/etc/ssl/cert.pem\0'
+        sites = [at+4 for at in range(init['address']-base,init['address']-base+0x400,4)
+                 if struct.unpack_from('<I',data,at)[0]&0x9f00001f == 0x90000001
+                 and struct.unpack_from('<I',data,at+4)[0]&0xffc003ff == 0x91000021
+                 and data[string_at(at):string_at(at)+len(cert)] == cert
+                 and call_target(at+8) == setstropt]
+        if len(sites) == 2:
+            for at in sites:
+                platform_patches.append(dict(name='no default CA file for curl',offset=at,original_bytes=data[at:at+4].hex()))
+                struct.pack_into('<I',data,at,0xd2800001) # mov x1, #0
+        else:
+            print('Note: unrecognised Curl_init_userdefined; factorio.com login may fail on iOS')
+        # If iOS rejects the server anyway, the game switches to a "built-in
+        # certificate bundle": the first system CA file that exists, which is
+        # that unreadable one again. Branch straight to its fallback instead,
+        # the cacert.pem shipped in the game data.
         pick = next(s for s in m.symbols() if s['name']=='__ZN10CurlHandle20pickCertFileLocationEv')
         at = pick['address']-base+0x30
-        adrp, add = struct.unpack_from('<II',data,at+0x144)
-        page = ((base+at+0x144)&~0xfff)+((((adrp>>5)&0x7ffff)<<2|(adrp>>29)&3)<<12)
         message = b'Failed to find the system certificate authority file, using shipped file\0'
-        text = page+((add>>10)&0xfff)-base
+        text = string_at(at+0x144)
         if struct.unpack_from('<I',data,at)[0] == 0x14000006 and data[text:text+len(message)] == message:
             struct.pack_into('<I',data,at,0x14000000|(0x13c>>2))
             platform_patches.append(dict(name='use the shipped CA certificate file',offset=at,original_bytes='06000014'))
