@@ -39,6 +39,7 @@ static void RecordBlocks(task_t task, void *context, unsigned type, vm_range_t *
 }
 
 static int CompareSizes(const void *a, const void *b);
+extern unsigned FilePagesInUse(void);
 
 static void LogLargeBlocks(void) {
     vm_address_t *zones=NULL;
@@ -116,10 +117,10 @@ static void LogBreakdown(const task_vm_info_data_t *vm) {
     for (unsigned i=0;i<257;i++) { sorted[i][0]=bytes[i]; sorted[i][1]=i; }
     qsort(sorted,257,sizeof sorted[0],CompareSizes);
     char line[1024];
-    int length=snprintf(line,sizeof line,"FPI_FOOTPRINT: %llu MB, graphics %lld, compressed %llu |",
+    int length=snprintf(line,sizeof line,"FPI_FOOTPRINT: %llu MB, graphics %lld, compressed %llu, file pages %u |",
                         vm->phys_footprint>>20,
                         (vm->ledger_tag_graphics_footprint+vm->ledger_tag_graphics_footprint_compressed)>>20,
-                        vm->compressed>>20);
+                        vm->compressed>>20,FilePagesInUse()*16);
     for (unsigned i=0;i<12 && sorted[i][0]>=(8<<20) && length<(int)sizeof line-48;i++) {
         unsigned tag=(unsigned)sorted[i][1];
         const char *name=tag==256 ? "mapped-file" : TagName(tag);
