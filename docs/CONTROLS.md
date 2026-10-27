@@ -16,9 +16,11 @@ touch, and return on the next touch. Buttons give a light haptic tap.
 | Outer arc: **Pick up**, **Shoot**, **Gun**, **Middle** | F / Space / Tab (switch gun; also answers the matching tutorial prompt) / middle click |
 | **Zoom** pair above the arc | Zoom out / in |
 | **Shift**, **Ctrl**, **Alt** | Tap to hold the modifier down; tap again to release |
-| **Keyboard** | Full keyboard with letters, numbers, Enter, function and arrow keys |
+| **Keyboard** | Full keyboard with letters, numbers, Enter, function and arrow keys. Keys show what Shift and Caps Lock make them type; **Copy** and **Paste** send Ctrl+C and Ctrl+V |
 
 The exact effect of each click depends on the game's context and key bindings.
+Pasting reads the iPhone or iPad clipboard, and iOS asks each time unless you
+allow it under **Settings → Apps → Factorio → Paste from Other Apps**.
 
 ## Touch modes
 

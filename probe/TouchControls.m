@@ -60,6 +60,7 @@ static void FPRequestPointerLock(UIViewController *controller,BOOL lock) {
 }
 
 static BOOL FPLeftButtonArrives;
+static NSNotificationName const FPInputChanged=@"FPInputChanged";
 
 @interface FPInputButton : UIButton
 @property(nonatomic) int scan;
@@ -67,32 +68,40 @@ static BOOL FPLeftButtonArrives;
 @property(nonatomic) int wheel;
 @property(nonatomic) BOOL inputHeld;
 @property(nonatomic) BOOL latch;
+@property(nonatomic) BOOL withCtrl;   // Adds Ctrl to its key, for Copy and Paste.
+@property(nonatomic) BOOL addedCtrl;
 @property(nonatomic) BOOL standalone; // Draws its own disc instead of sitting on a shared pill.
 @property(nonatomic) BOOL captioned;  // Icon above a small title.
 @property(nonatomic,copy) NSString *text;
+- (NSString *)typedText;
 - (void)refreshAppearance;
 @end
 @implementation FPInputButton
+// What the key types with the current Shift and Caps Lock state.
+- (NSString *)typedText {
+    BOOL shift=(SDL_GetModState()&FPI_MOD_SHIFT)!=0;
+    BOOL caps=(SDL_GetModState()&FPI_MOD_CAPS)!=0;
+    NSString *text=(shift!=caps) ? self.text.uppercaseString : self.text;
+    if (shift && self.text.length==1) {
+        NSString *plain=@"`1234567890-=[]\\;',./";
+        NSString *shifted=@"~!@#$%^&*()_+{}|:\"<>?";
+        NSRange index=[plain rangeOfString:self.text];
+        if (index.location!=NSNotFound) text=[shifted substringWithRange:NSMakeRange(index.location,1)];
+    }
+    return text;
+}
 - (void)sendDown:(BOOL)down {
     if (self.inputHeld==down) return;
     self.inputHeld=down;
+    if (down && self.withCtrl && !(SDL_GetModState()&FPI_MOD_CTRL)) { self.addedCtrl=YES; FPIKeyboard(SDL_SCANCODE_LCTRL,1); }
     if (self.scan) FPIKeyboard(self.scan,down);
-    if (down && self.text && !(SDL_GetModState()&(FPI_MOD_CTRL|FPI_MOD_ALT|FPI_MOD_GUI))) {
-        BOOL shift=(SDL_GetModState()&FPI_MOD_SHIFT)!=0;
-        BOOL caps=(SDL_GetModState()&FPI_MOD_CAPS)!=0;
-        NSString *text=(shift!=caps) ? self.text.uppercaseString : self.text;
-        if (shift && self.text.length==1) {
-            NSString *plain=@"`1234567890-=[]\\;',./";
-            NSString *shifted=@"~!@#$%^&*()_+{}|:\"<>?";
-            NSRange index=[plain rangeOfString:self.text];
-            if (index.location!=NSNotFound) text=[shifted substringWithRange:NSMakeRange(index.location,1)];
-        }
-        FPIText(text.UTF8String);
-    }
+    if (!down && self.addedCtrl) { self.addedCtrl=NO; FPIKeyboard(SDL_SCANCODE_LCTRL,0); }
+    if (down && self.text && !(SDL_GetModState()&(FPI_MOD_CTRL|FPI_MOD_ALT|FPI_MOD_GUI))) FPIText(self.typedText.UTF8String);
     if (self.mouseButton) FPIMouseButton(self.mouseButton,down);
     if (self.wheel && down) FPIWheel(self.wheel);
     if (down) [FPPressFeedback() impactOccurred];
     [self refreshAppearance];
+    [NSNotificationCenter.defaultCenter postNotificationName:FPInputChanged object:self];
 }
 - (void)down { [self sendDown:self.latch ? !self.inputHeld : YES]; }
 - (void)up { if (!self.latch) [self sendDown:NO]; }
@@ -389,6 +398,7 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
         [self wake];
         NSNotificationCenter *center=[NSNotificationCenter defaultCenter];
         [center addObserver:self selector:@selector(releaseInputs) name:UIApplicationWillResignActiveNotification object:nil];
+        [center addObserver:self selector:@selector(refreshKeyLabels) name:FPInputChanged object:nil];
         for (NSNotificationName name in @[GCMouseDidConnectNotification,GCMouseDidDisconnectNotification,
                                           GCKeyboardDidConnectNotification,GCKeyboardDidDisconnectNotification,
                                           GCControllerDidConnectNotification,GCControllerDidDisconnectNotification])
@@ -570,13 +580,14 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
         @[@"Tab",@"q",@"w",@"e",@"r",@"t",@"y",@"u",@"i",@"o",@"p",@"[",@"]",@"\\"],
         @[@"Caps",@"a",@"s",@"d",@"f",@"g",@"h",@"j",@"k",@"l",@";",@"'",@"Enter"],
         @[@"Shift",@"z",@"x",@"c",@"v",@"b",@"n",@"m",@",",@".",@"/",@"↑",@"Del"],
-        @[@"Ctrl",@"Alt",@"Cmd",@"Space",@"Home",@"End",@"PgUp",@"PgDn",@"Ins",@"←",@"↓",@"→"]];
+        @[@"Ctrl",@"Alt",@"Cmd",@"Space",@"Copy",@"Paste",@"Home",@"End",@"PgUp",@"PgDn",@"Ins",@"←",@"↓",@"→"]];
     NSDictionary *special=@{@"Esc":@(SDL_SCANCODE_ESCAPE),@"⌫":@(SDL_SCANCODE_BACKSPACE),@"Tab":@(SDL_SCANCODE_TAB),
         @"Caps":@(SDL_SCANCODE_CAPSLOCK),@"Enter":@(SDL_SCANCODE_RETURN),@"Shift":@(SDL_SCANCODE_LSHIFT),
         @"Ctrl":@(SDL_SCANCODE_LCTRL),@"Alt":@(SDL_SCANCODE_LALT),@"Cmd":@(SDL_SCANCODE_LGUI),
         @"Space":@(SDL_SCANCODE_SPACE),@"Home":@(SDL_SCANCODE_HOME),@"End":@(SDL_SCANCODE_END),
         @"PgUp":@(SDL_SCANCODE_PAGEUP),@"PgDn":@(SDL_SCANCODE_PAGEDOWN),@"Ins":@(SDL_SCANCODE_INSERT),
-        @"Del":@(SDL_SCANCODE_DELETE),@"←":@(SDL_SCANCODE_LEFT),@"↓":@(SDL_SCANCODE_DOWN),@"→":@(SDL_SCANCODE_RIGHT),@"↑":@(SDL_SCANCODE_UP)};
+        @"Del":@(SDL_SCANCODE_DELETE),@"←":@(SDL_SCANCODE_LEFT),@"↓":@(SDL_SCANCODE_DOWN),@"→":@(SDL_SCANCODE_RIGHT),@"↑":@(SDL_SCANCODE_UP),
+        @"Copy":@(SDL_SCANCODE_C),@"Paste":@(SDL_SCANCODE_V)};
     for (NSArray<NSString *> *labels in rows) {
         NSMutableArray *buttons=[NSMutableArray new];
         for (NSString *label in labels) {
@@ -585,6 +596,7 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
             [self.buttons removeLastObject];
             b.standalone=YES; b.layer.cornerRadius=7;
             b.latch=[@[@"Shift",@"Ctrl",@"Alt",@"Cmd"] containsObject:label];
+            b.withCtrl=[@[@"Copy",@"Paste"] containsObject:label]; // Factorio's text boxes take Ctrl+C and Ctrl+V
             if (label.length==1 && !special[label]) b.text=label; // ⌫ and the arrows are keys, not text
             if ([label isEqual:@"Space"]) b.text=@" ";
             [b refreshAppearance];
@@ -593,6 +605,11 @@ static BOOL FPDirectionHas(int direction,int a,int b,int c) { return direction==
         [self.keyRows addObject:buttons];
     }
     [self addSubview:self.keyboard];
+}
+// Letters and symbols show what they type, so Shift and Caps Lock are visible.
+- (void)refreshKeyLabels {
+    for (NSArray<FPInputButton *> *row in self.keyRows) for (FPInputButton *b in row)
+        if (b.text.length==1 && ![b.text isEqual:@" "]) [b setTitle:b.typedText forState:UIControlStateNormal];
 }
 - (void)toggleControls {
     [self releaseInputs]; self.expanded=!self.expanded; self.autoHidden=NO;
