@@ -1,47 +1,102 @@
 # Controls
 
 The touch controls float over the game in landscape and move onto a panel below
-it in portrait. They're translucent, fade back after five seconds without a
-touch, and return on the next touch. Buttons give a light haptic tap.
+it in portrait. They're laid out by thumb: the left thumb walks and holds
+modifiers, the right thumb acts, and panels sit on the edges. They're
+translucent, fade back after five seconds without a touch, and return on the
+next one. Buttons give a light haptic tap.
 
-## Layout
+An **orange dot** on a button means holding it does something else.
 
-| Control | Function |
+## Touching the game
+
+Choose the mode in the top pill. **Direct** is the default.
+
+| Direct | Effect |
 |---|---|
-| **Pill at the top** | Touch mode (**Tap** / **Mine** / **Cursor**), on-screen keyboard, iOS text box, and the eye button to hide or show the controls |
-| **Stick**, bottom left | Walk (W A S D), in eight equal directions, so diagonals are as easy as straight lines |
-| **Rail above the stick** | Menu (Esc), Inventory (E), Research (T), Map (M) |
-| **Use**, the large button in the bottom-right corner | Left click: select, build, open |
-| Inner arc: **Mine**, **Rotate**, **Pipette** | Right click (mine, remove) / R / Q (pick an entity, or clear the cursor) |
-| Outer arc: **Pick up**, **Shoot**, **Gun**, **Middle** | F / Space / Tab (switch gun; also answers the matching tutorial prompt) / middle click |
-| **Zoom** pair above the arc | Zoom out / in |
-| **Shift**, **Ctrl**, **Alt** | Tap to hold the modifier down; tap again to release |
-| **Keyboard** | Full keyboard with letters, numbers, Enter, function and arrow keys. Keys show what Shift and Caps Lock make them type; **Copy** and **Paste** send Cmd+C and Cmd+V |
-| **Text box** (the I-beam in the pill) | A native text field with the iOS keyboard, its paste menu and dictation. Tap one of the game's text boxes first; **Return** types the text into it |
+| Tap | Left click: build, open, select |
+| Hold still for 0.35 s | Right click, held: mine, remove, craft 5 |
+| Drag | Left button held: drag-build belts, select areas, pan the map |
+| Pinch | Zoom, centred between your fingers |
 
-The exact effect of each click depends on the game's context and key bindings.
-Pasting reads the iPhone or iPad clipboard, and iOS asks each time unless you
-allow it under **Settings → Apps → Factorio → Paste from Other Apps**.
+**Precise:** your finger moves a white arrow without clicking, and **Use** and
+**Mine** click at its tip. Pinch still zooms. Use it for small targets.
 
-## Touch modes
+While the controls are hidden, or the on-screen keyboard is open, touches on
+the game work as in Direct.
 
-Choose a mode in the top pill. The active one is highlighted, and a short hint
-appears below it.
+## Right thumb
 
-- **Tap:** touching the screen clicks where you touch. Use it for menus and
-  ordinary play.
-- **Mine:** holding a finger on a tree or ore holds the right mouse button, so
-  you mine it. Switch back to Tap for menus.
-- **Cursor:** touching moves a white arrow without clicking; then press **Use**
-  or **Mine** to click at the arrow's tip. To drag, hold **Use** or **Mine** and
-  slide a second finger across the game.
+| Button | Sends |
+|---|---|
+| **Use** | Left click, held while pressed |
+| **Mine** | Right click, held while pressed |
+| **Rotate** (dot) | R; hold for Shift+R, the other way round |
+| **Pipette** (dot) | Q; hold to clear the cursor |
+| **Pick up** | F, held |
+| **Shoot** | Space, held |
+| **Weapon** | C, next weapon |
+| **Vehicle** | Enter, get in or out |
+| **Drop** | Z, drop the item in hand |
+
+## Left thumb
+
+**Stick:** walk (W A S D) in eight equal directions, so diagonals are as easy
+as straight lines. It floats: put your thumb anywhere in the left third of the
+screen, below the left rail, and the stick centres under it. It goes back when
+you lift.
+
+**Shift**, **Ctrl** and **Alt** go round clicks and zoom steps, never on their
+own. Their captions say what they're for: Shift+click builds a ghost,
+Ctrl+click moves items fast and Ctrl+right click splits them, Alt+click opens
+Factoriopedia and Alt with a pinch changes quality.
+
+- **Tap:** the next click only.
+- **Hold:** every click while your finger stays on it.
+- **Double-tap:** locked, in orange, until you tap it again.
+
+Hiding the controls or opening the on-screen keyboard turns them all off.
+
+## Edges
+
+| Where | Buttons |
+|---|---|
+| Left rail | Menu (Esc), Inventory (E), Research (T), Map (M), More |
+| More | Production (P), Logistics (L), Trains (O), Blueprints (B), Factoriopedia, Chat (`) |
+| Right rail | Undo (Cmd+Z; hold to redo), Copy, Cut, Paste (Cmd+C, X, V), Flip (H; hold for V, vertical), Alt view |
+
+**More** opens a small panel beside the rail and stays lit while it's open.
+Choose one, or touch anywhere else to close it. Factoriopedia has no key of its
+own: it arms Alt, so your next tap on something opens it there.
+
+**Alt view** toggles the game's alt-mode and lights up while it's on. It can't
+see the game, so the light is wrong if you toggle alt-mode some other way.
+
+## Top pill
+
+Direct and Precise, then:
+
+- **Keyboard:** a full keyboard with letters, numbers, Enter, function and
+  arrow keys. Keys show what Shift and Caps Lock make them type; **Copy** and
+  **Paste** send Cmd+C and Cmd+V. The thumb controls hide while it's open.
+- **Text box** (the I-beam): a native text field with the iOS keyboard, its
+  paste menu and dictation. Tap one of the game's text boxes first; **Return**
+  types the text into it.
+- **Eye:** hides everything but itself; tap it again to bring the controls
+  back.
+
+The exact effect of each key and click depends on the game's context and key
+bindings. Pasting reads the iPhone or iPad clipboard, and iOS asks each time
+unless you allow it under **Settings → Apps → Factorio → Paste from Other Apps**.
 
 ## Portrait
 
-Rotate the device to portrait to put the controls on a solid panel below the
-game. The game shrinks to the upper part of the screen, so no control covers
-it, and the on-screen keyboard opens in the panel with the game still visible
-above. Hiding the controls with the eye button gives the game the whole screen.
+Rotate the device to portrait to put the controls on a solid deck below the
+game: the pill on top, the two rails as rows, then the stick and its modifiers
+on the left and the thumb cluster on the right. The stick floats in the left
+third of the deck. The game shrinks to the space above, so no control covers
+it, and the on-screen keyboard opens in the deck with the game still visible.
+Hiding the controls gives the game the whole screen.
 
 ## Bluetooth keyboard, mouse, trackpad and controllers
 
@@ -74,14 +129,13 @@ on the inner one. The port works around it on 27.1:
 - it draws its own white arrow on the inner display while you move the trackpad;
 - the trackpad's **right button acts as left click**, because the left click
   never arrives. To mine or remove, bind **Mine** to a keyboard key in
-  Factorio's **Settings → Controls**, or use the overlay's **Mine** mode.
+  Factorio's **Settings → Controls**, or hold a finger still on the game.
 
 iOS 27.2 fixes the bug, and on 27.2 or later both workarounds switch off: you get
 iOS's pointer only, with normal left and right clicks. Updating to iOS 27.2 is
 recommended for trackpad play.
 
-## Hiding the controls
+## Nothing stays stuck
 
-The eye button at the top hides everything except itself; tap it again to bring
-the controls back. Any held button or key is released when the controls are
-hidden, the window resizes, or the device rotates, so nothing stays stuck down.
+Any held button or key is released when the controls are hidden, the window
+resizes, the device rotates or the app goes to the background.
