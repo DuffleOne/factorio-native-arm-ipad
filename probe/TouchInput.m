@@ -15,6 +15,7 @@ static const int FPModScans[4][2]={{FPModShift,SDL_SCANCODE_LSHIFT},{FPModCtrl,S
                                    {FPModAlt,SDL_SCANCODE_LALT},{FPModCmd,SDL_SCANCODE_LGUI}};
 
 void FPClick(int button,BOOL down) { FPIMouseButton(button,down); }
+void FPWheel(float y) { FPIWheel(y); }
 
 void FPTapKey(int scan,FPMods mods) {
     for (int i=0;i<4;i++) if (mods&FPModScans[i][0]) FPIKeyboard(FPModScans[i][1],1);
