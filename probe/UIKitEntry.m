@@ -33,18 +33,28 @@ int ProbeMain(int argc, char **argv) {
             BOOL phone=UI_USER_INTERFACE_IDIOM()==UIUserInterfaceIdiomPhone;
             NSString *compression=phone ? @"low-quality" : @"none";
             NSString *atlasCompression=phone ? @"true" : @"false";
-            NSString *text=[NSString stringWithFormat:@"[path]\nread-data=%@\nwrite-data=%@\n[general]\ncheck-updates=false\n[graphics]\ntexture-compression-level=%@\ncompress-virtual-atlas=%@\ngpu-accelerated-compression=false\ngpu-accelerated-mipmap-compression=false\nvideo-memory-usage=low\nmax-sprite-loading-threads=2\n",data,user,compression,atlasCompression];
+            // Half-resolution terrain saves about 150 MB with 84 mods; the other
+            // high-quality-* switches don't change what the game loads.
+            NSString *terrain=phone ? @"high-quality-terrain=false\n" : @"";
+            NSString *text=[NSString stringWithFormat:@"[path]\nread-data=%@\nwrite-data=%@\n[general]\ncheck-updates=false\n[graphics]\ntexture-compression-level=%@\ncompress-virtual-atlas=%@\ngpu-accelerated-compression=false\ngpu-accelerated-mipmap-compression=false\nvideo-memory-usage=low\nmax-sprite-loading-threads=2\n%@",data,user,compression,atlasCompression,terrain];
             if ([[NSFileManager defaultManager] fileExistsAtPath:config]) {
                 NSString *existing=[NSString stringWithContentsOfFile:config encoding:NSUTF8StringEncoding error:&error];
                 if (!existing) { fprintf(stderr,"FACTORIO_PROBE: cannot read config: %s\n",error.description.UTF8String); return 1; }
                 NSMutableArray<NSString *> *lines=[[existing componentsSeparatedByString:@"\n"] mutableCopy];
                 BOOL inPaths=NO;
                 BOOL inGraphics=NO;
+                BOOL terrainSet=NO;
+                NSUInteger graphicsLine=NSNotFound;
                 for (NSUInteger i=0;i<lines.count;i++) {
                     NSString *line=[lines[i] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
                     if ([line hasPrefix:@"["]) {
                         inPaths=[line isEqualToString:@"[path]"];
                         inGraphics=[line isEqualToString:@"[graphics]"];
+                        if (inGraphics) graphicsLine=i;
+                    }
+                    if (phone && inGraphics && [line hasPrefix:@"high-quality-terrain="]) {
+                        lines[i]=@"high-quality-terrain=false";
+                        terrainSet=YES;
                     }
                     if (inPaths && [line hasPrefix:@"read-data="]) lines[i]=[@"read-data=" stringByAppendingString:data];
                     if (inPaths && [line hasPrefix:@"write-data="]) lines[i]=[@"write-data=" stringByAppendingString:user];
@@ -52,6 +62,10 @@ int ProbeMain(int argc, char **argv) {
                         lines[i]=@"texture-compression-level=low-quality";
                     if (phone && inGraphics && [line isEqualToString:@"compress-virtual-atlas=false"])
                         lines[i]=@"compress-virtual-atlas=true";
+                }
+                if (phone && !terrainSet) {
+                    if (graphicsLine==NSNotFound) [lines addObjectsFromArray:@[@"[graphics]",@"high-quality-terrain=false",@""]];
+                    else [lines insertObject:@"high-quality-terrain=false" atIndex:graphicsLine+1];
                 }
                 text=[lines componentsJoinedByString:@"\n"];
             }
