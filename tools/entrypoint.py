@@ -55,9 +55,25 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
         expected = 817 if sdl_major == 2 else 1269
         if len(redirects) != expected:
             raise ValueError(f'SDL{sdl_major} redirect set changed: expected {expected}, got {len(redirects)}')
-    stub = (first-16*(1+len(redirects))) & ~15
+    # Steam Cloud stand-in (probe/SteamCloud.mm): the Mac build reads player-data.json,
+    # with the factorio.com login and multiplayer name, only from Steam Cloud, which the
+    # no-Steam context answers with nothing. Redirect those base methods, which only that
+    # context uses, to the shim, which serves the game's own local copy.
+    cloud = []
+    if sdl_path:
+        names = {s['name']:s for s in m.symbols() if 'library' not in s}
+        shim = {s['name'] for s in MachO(path.parent/'Frameworks/ProbeShim.dylib').symbols() if 'library' not in s}
+        string = 'ERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEE'
+        for method,replacement in (('21getCloudFileTimestamp','_FPICloudFileTimestamp'),
+                                   ('15cloudFileExists','_FPICloudFileExists'),
+                                   ('13readCloudFile','_FPIReadCloudFile')):
+            symbol = names.get('__ZNK21SteamContextInterface'+method+string)
+            if symbol and replacement in shim:
+                cloud.append((symbol,replacement,'Steam Cloud stand-in: '+method[2:]))
+    count = 1+len(redirects)+len(cloud)
+    stub = (first-16*count) & ~15
     assert stub >= 32+struct.unpack_from('<I',data,20)[0]
-    assert data[stub:stub+16*(1+len(redirects))] == bytes(16*(1+len(redirects)))
+    assert data[stub:stub+16*count] == bytes(16*count)
     text = next(p for p,name in segments if name==b'__TEXT')
     base = struct.unpack_from('<Q',data,text+24)[0]
     def trampoline(at, pointer_vm):
@@ -81,17 +97,18 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
     bss_slot = (bss_end+7)&~7
     const_slot = slot+8
     changes = []
-    for i,symbol in enumerate(redirects):
+    platform_patches = []
+    for i,(symbol,target,label) in enumerate([(s,s['name'],None) for s in redirects]+cloud):
         at = stub+16*(i+1)
         if const_slot+8 <= fileoff+filesize:
             assert data[const_slot:const_slot+8]==bytes(8)
             pointer_vm = vm+const_slot-fileoff
-            extra += binding_for(symbol['name'],seg_index,const_slot-fileoff)
+            extra += binding_for(target,seg_index,const_slot-fileoff)
             const_slot += 8
         else:
             assert bss_slot>=data_vm+data_size and bss_slot+8<=data_vm+data_vmsize, 'Insufficient zero-fill padding'
             pointer_vm = bss_slot
-            extra += binding_for(symbol['name'],data_index,bss_slot-data_vm)
+            extra += binding_for(target,data_index,bss_slot-data_vm)
             bss_slot += 8
         trampoline(at,pointer_vm)
         offset = symbol['address']-base
@@ -99,8 +116,10 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
         assert displacement % 4 == 0 and -(1<<27)<=displacement<(1<<27)
         before = data[offset:offset+4].hex()
         struct.pack_into('<I',data,offset,0x14000000|((displacement>>2)&0x3ffffff))
-        changes.append(dict(name=symbol['name'],offset=offset,original_bytes=before,trampoline=at))
-    platform_patches = []
+        if label:
+            platform_patches.append(dict(name=label,offset=offset,original_bytes=before))
+        else:
+            changes.append(dict(name=symbol['name'],offset=offset,original_bytes=before,trampoline=at))
     if sdl_path and sdl_major == 2:
         # This block reaches into the macOS SDL_VideoDisplay::driverdata solely
         # to append a CGDirectDisplayID to a log message. UIKit has different
