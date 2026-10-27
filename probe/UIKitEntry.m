@@ -74,6 +74,17 @@ int ProbeMain(int argc, char **argv) {
                 [arguments addObjectsFromArray:@[@"--benchmark",[user stringByAppendingPathComponent:@"probe-map.zip"],@"--benchmark-ticks",@"120"]];
             } else {
                 [arguments addObjectsFromArray:@[@"--force-metal",@"--graphics-quality",@"medium"]];
+                // A big mod set's sounds can take a gigabyte, which a large modded save can't
+                // spare under iOS's memory limit (84 mods: 0.9 GB of 6.1), so modded games are silent.
+                NSData *modList=[NSData dataWithContentsOfFile:[user stringByAppendingPathComponent:@"mods/mod-list.json"]];
+                NSArray *mods=modList ? [NSJSONSerialization JSONObjectWithData:modList options:0 error:NULL][@"mods"] : nil;
+                NSSet *builtIn=[NSSet setWithArray:@[@"base",@"elevated-rails",@"quality",@"space-age"]];
+                for (NSDictionary *mod in [mods isKindOfClass:NSArray.class] ? mods : @[]) {
+                    if (![mod[@"enabled"] boolValue] || [builtIn containsObject:mod[@"name"]]) continue;
+                    fprintf(stderr,"FACTORIO_PROBE: mods enabled, starting without audio to save memory\n");
+                    [arguments addObject:@"--disable-audio"];
+                    break;
+                }
             }
             argc=(int)arguments.count;
             char **owned=calloc(argc+1,sizeof(char *));
