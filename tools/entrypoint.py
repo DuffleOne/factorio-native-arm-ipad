@@ -120,15 +120,7 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
             platform_patches.append(dict(name=label,offset=offset,original_bytes=before))
         else:
             changes.append(dict(name=symbol['name'],offset=offset,original_bytes=before,trampoline=at))
-    if sdl_path and sdl_major == 2:
-        # This block reaches into the macOS SDL_VideoDisplay::driverdata solely
-        # to append a CGDirectDisplayID to a log message. UIKit has different
-        # driverdata. Preserve the display name, bounds, pixel format and Hz log.
-        log = next(s for s in m.symbols() if s['name']=='__ZN9SDLWindow18logDisplayAdaptersEv')
-        at = log['address']-base+424
-        assert struct.unpack_from('<I',data,at)[0] == 0xaa1403e0
-        struct.pack_into('<I',data,at,0x14000000|(((-152)>>2)&0x3ffffff))
-        platform_patches.append(dict(name='skip macOS display-ID log suffix',offset=at,original_bytes='e00314aa'))
+    if sdl_path:
         # factorio.com logins: the Mac build's curl names /etc/ssl/cert.pem as
         # its default CA file, which the iOS sandbox won't let the app read,
         # and its Secure Transport backend then fails rather than use the
@@ -168,6 +160,15 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
             platform_patches.append(dict(name='use the shipped CA certificate file',offset=at,original_bytes='06000014'))
         else:
             print('Note: unrecognised CurlHandle::pickCertFileLocation; factorio.com login may fail on iOS')
+    if sdl_path and sdl_major == 2:
+        # This block reaches into the macOS SDL_VideoDisplay::driverdata solely
+        # to append a CGDirectDisplayID to a log message. UIKit has different
+        # driverdata. Preserve the display name, bounds, pixel format and Hz log.
+        log = next(s for s in m.symbols() if s['name']=='__ZN9SDLWindow18logDisplayAdaptersEv')
+        at = log['address']-base+424
+        assert struct.unpack_from('<I',data,at)[0] == 0xaa1403e0
+        struct.pack_into('<I',data,at,0x14000000|(((-152)>>2)&0x3ffffff))
+        platform_patches.append(dict(name='skip macOS display-ID log suffix',offset=at,original_bytes='e00314aa'))
         if simulator_metal:
             # Simulator reports neither Mac1 nor Apple7. This opt-in diagnostic
             # lets the real renderer expose its actual missing capabilities.
