@@ -27,11 +27,11 @@ static char **OwnedArguments(NSArray<NSString *> *arguments) {
 }
 
 // Long-pressing the icon offers Safe mode (UIApplicationShortcutItems in build_probe.py).
-// UIKit passes the choice to the scene delegate, which SDL's app delegate also is, as
-// the scene connects; SDL starts the game after that.
+// UIKit passes the choice to the scene delegate as the scene connects, SDL 3's own class
+// or SDL 2's app delegate; SDL starts the game after that.
 static void WatchForSafeMode(void) {
     SEL connect=@selector(scene:willConnectToSession:options:);
-    Method method=class_getInstanceMethod(NSClassFromString(@"SDLUIKitDelegate"),connect);
+    Method method=class_getInstanceMethod(NSClassFromString(@"SDLUIKitSceneDelegate") ?: NSClassFromString(@"SDLUIKitDelegate"),connect);
     if (!method) { fprintf(stderr,"FACTORIO_PROBE: no SDL scene delegate, safe mode unavailable\n"); return; }
     void (*connectScene)(id,SEL,UIScene *,UISceneSession *,UISceneConnectionOptions *)=(void *)method_getImplementation(method);
     method_setImplementation(method,imp_implementationWithBlock(^(id delegate,UIScene *scene,UISceneSession *session,UISceneConnectionOptions *options) {
