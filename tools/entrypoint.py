@@ -122,7 +122,7 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
         struct.pack_into('<I',data,offset,0x14000000|((displacement>>2)&0x3ffffff))
         changes.append(dict(name=symbol['name'],offset=offset,original_bytes=before,trampoline=at))
     platform_patches = []
-    if sdl_path and sdl_major == 2:
+    if sdl_path:
         # Factorio restarts itself with execv, after syncing mods for example.
         # iOS can't exec, so the game aborted. Quit instead, with _exit as exec
         # would (no static destructors after teardown); the player reopens it.
@@ -131,7 +131,7 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
             return base+at+4*(offset-(1<<26) if offset&(1<<25) else offset)
         restart = next(s for s in m.symbols() if s['name']=='__ZN10AppManager10restartAppEbNSt3__16vectorINS0_12basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEENS5_IS7_EEEEb')
         execv, exit_stub = stub_address(m,'_execv'), stub_address(m,'__exit')
-        calls = [at for at in range(restart['address']-base,restart['address']-base+0x400,4)
+        calls = [at for at in range(restart['address']-base,restart['address']-base+0x800,4)
                  if struct.unpack_from('<I',data,at)[0]>>26 == 0b100101 and call_target(at) == execv]
         if len(calls) == 1 and exit_stub:
             at = calls[0]
@@ -141,6 +141,7 @@ def inject_entry(path, sdl_path=None, simulator_metal=False, sdl_major=2):
             struct.pack_into('<I',data,at,0x94000000|(((exit_stub-base-at)>>2)&0x3ffffff)) # bl _exit
         else:
             print('Note: unrecognised AppManager::restartApp; restarting will abort on iOS')
+    if sdl_path and sdl_major == 2:
         # This block reaches into the macOS SDL_VideoDisplay::driverdata solely
         # to append a CGDirectDisplayID to a log message. UIKit has different
         # driverdata. Preserve the display name, bounds, pixel format and Hz log.
